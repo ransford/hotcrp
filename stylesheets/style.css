@@ -14,6 +14,24 @@ body {
 
 
 /* header */
+#hdr {
+	background: linear-gradient(90deg, #600000, #500000, #700000, #500000, #600000) repeat-x top center;
+        background-size: 5em 100%;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-weight: 300;
+        padding: 5px 0 5px 10px;
+        font-size: 11pt;
+        color: #fff2f2;
+        border-bottom: 1px solid #ff8888;
+}
+#hdr a, #hdr a.qq, #hdr .barsep {
+	color: #fff2f2;
+}
+#hdr_right {
+	float: right;
+	padding: 0.1em 10px 0 0;
+	font-size: 10pt;
+}
 #header {
 	background-image: url(../images/headgrad.png);
 	background-repeat: repeat-x;
@@ -152,7 +170,7 @@ a.small {
 	font-size: smaller;
 }
 span.barsep {
-	color: #b4b4df;
+	opacity: 0.3;
 }
 a img {
 	border: none;
