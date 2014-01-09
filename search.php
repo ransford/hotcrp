@@ -22,7 +22,7 @@ else if (isset($_REQUEST["default"]))
 // paper group
 $tOpt = PaperSearch::searchTypes($Me);
 if (count($tOpt) == 0) {
-    $Conf->header("Search", "search", actionBar());
+    $Conf->header("Search", "search", "");
     $Conf->errorMsg("You are not allowed to search for papers.");
     exit;
 }
@@ -1121,7 +1121,8 @@ if ($Me->privChair) {
 
 
 // search
-$Conf->header("Search", "search", actionBar());
+$Conf->header("Search", "search", "");
+unset($_REQUEST["urlbase"]);
 $Search = new PaperSearch($Me, $_REQUEST);
 if (isset($_REQUEST["q"])) {
     $pl = new PaperList($Search, array("sort" => true, "list" => true,
