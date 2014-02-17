@@ -1991,10 +1991,10 @@ class Conference {
 
         // new header
         echo "<div id=\"hdr\">",
-            "<a class=\"qq\" href=\"",
+            "<div id=\"hdr_left\"><a class=\"qq\" href=\"",
             hoturl("index"), "\" title=\"Home\">",
             htmlspecialchars($Opt["shortName"]),
-            "</a>";
+            "</a></div>";
         echo "<div id=\"hdr_right\">";
         if ($Me && $Me->is_known_user()) {
             // profile link
@@ -2026,7 +2026,7 @@ class Conference {
             else
                 echo "<a class=\"qq\" href='", hoturl("index", "signin=1"), "'>Sign&nbsp;in</a>";
         }
-        echo "</div></div>";
+        echo "</div><div style=\"clear:both\"></div></div>";
 
         echo "<div id='header'>\n";
         if (!($title && $showTitle && $title == "Home"))

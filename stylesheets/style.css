@@ -27,6 +27,9 @@ body {
 #hdr a, #hdr a.qq, #hdr .barsep {
 	color: #fff2f2;
 }
+#hdr_left {
+	float: left;
+}
 #hdr_right {
 	float: right;
 	padding: 0.1em 10px 0 0;
