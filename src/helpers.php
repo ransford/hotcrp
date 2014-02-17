@@ -1189,7 +1189,7 @@ function actionTab($text, $url, $default) {
         return "    <td><div class='vbtab'><a href='$url'>$text</a></div></td>\n";
 }
 
-function actionBar($mode = "", $prow = null) {
+function actionBar($mode = "", $prow = null, $pre_spanner_td = null) {
     global $Me, $Conf, $CurrentList;
     $forceShow = ($Me->is_admin_force() ? "&amp;forceShow=1" : "");
 
@@ -1225,14 +1225,17 @@ function actionBar($mode = "", $prow = null) {
     }
 
     // collect actions
-    $x = "<div class='nvbar'><table class='vbar'><tr><td class='spanner'></td>\n";
+    $x = "<div class=\"nvbar\"><table class=\"vbar\"><tr>";
+    if ($pre_spanner_td)
+        $x .= $pre_spanner_td;
+    $x .= "<td class=\"spanner\"></td>\n";
 
     if ($quicklinks_txt)
-        $x .= "  <td class='quicklinks nowrap'>" . $quicklinks_txt . "</td>\n";
+        $x .= "<td class=\"quicklinks nowrap\">" . $quicklinks_txt . "</td>\n";
     if ($quicklinks_txt && $Me->privChair && $listtype == "p")
-        $x .= "  <td id=\"trackerconnect\" class=\"nowrap\"><a id=\"trackerconnectbtn\" href=\"#\" onclick=\"return hotcrp_deadlines.tracker(1)\" class=\"btn btn-default\" title=\"Start meeting tracker\">&#9759;</a><td>\n";
+        $x .= "<td id=\"trackerconnect\" class=\"nowrap\"><a id=\"trackerconnectbtn\" href=\"#\" onclick=\"return hotcrp_deadlines.tracker(1)\" class=\"btn btn-default\" title=\"Start meeting tracker\">&#9759;</a><td>\n";
 
-    $x .= "  <td class='gopaper nowrap'>" . goPaperForm($goBase, $xmode) . "</td>\n";
+    $x .= "<td class=\"gopaper nowrap\">" . goPaperForm($goBase, $xmode) . "</td>\n";
 
     return $x . "</tr></table></div>";
 }
