@@ -1701,15 +1701,6 @@ class PaperTable {
             $this->papstripReviewPreference();
     }
 
-    function _paptabTabLink($text, $link, $image, $highlight) {
-        global $Conf;
-        echo "<div class='", ($highlight ? "papmodex" : "papmode"),
-            "'><a href='", $link, "' class='", ($highlight ? "qx" : "xx"),
-            "'>", Ht::img($image, "[$text]", "b"),
-            "&nbsp;<u", ($highlight ? " class='x'" : ""), ">", $text,
-            "</u></a></div>\n";
-    }
-
     function mode_links() {
         global $Me;
 
@@ -1740,15 +1731,42 @@ class PaperTable {
         return $links;
     }
 
-    function _paptabBeginKnown() {
-        echo "<div class='pban'>";
+    private function _mode_tab($x) {
+	return "<div class=\"" . ($x[2] ? "papmodex" : "papmode")
+	    . "\"><a href='" . $x[0] . "' class='" . ($x[2] ? "qx" : "xx")
+            . "'>" . Ht::img($x[3], "[$x[1]]", "b")
+	    . "&nbsp;<u" . ($x[2] ? " class='x'" : "") . ">" . $x[1]
+            . "</u></a></div>\n";
+    }
+
+    private function _mode_but($x) {
+	return "<div class=\"" . ($x[2] ? "modebutx" : "modebut")
+	    . "\"><a href=\"" . $x[0] . "\" class='" . ($x[2] ? "qx" : "xx")
+	    . "'>" . Ht::img($x[3], "[$x[1]]", "b")
+	    . "&nbsp;<u" . ($x[2] ? " class='x'" : "") . ">" . $x[1]
+	    . "</u></a></div>\n";
+    }
+
+    function mode_buttons_text() {
         $links = $this->mode_links();
         if (count($links)) {
-            echo "<div class='psmodec'><div class='psmode'>";
+            $t = "<td class=\"nowrap\" style=\"vertical-align:middle\">";
             foreach ($links as $link)
-                $this->_paptabTabLink($link[1], $link[0], $link[3], $link[2]);
-            echo "<div class='clear'></div></div></div>\n";
-        }
+                $t .= $this->_mode_but($link);
+            return $t . "</td>";
+        } else
+            return null;
+    }
+
+    function _paptabBeginKnown($nolinks = false) {
+	echo "<div class='pban'>";
+        $links = $this->mode_links();
+        if (count($links) && !$nolinks) {
+	    echo "<div class='psmodec'><div class='psmode'>";
+            foreach ($links as $link)
+                echo $this->_mode_tab($link);
+	    echo "<div class='clear'></div></div></div>\n";
+	}
 
         // paper number
         $pid = $this->prow->paperId;
@@ -1826,13 +1844,13 @@ class PaperTable {
         echo "</div></form>";
     }
 
-    function paptabBegin() {
+    function paptabBegin($nolinks = false) {
         global $Conf, $Me;
         $prow = $this->prow;
         $pboxclass = $prow ? "pbox" : "pboxn";
 
         if ($prow) {
-            $this->_paptabBeginKnown();
+            $this->_paptabBeginKnown($nolinks);
             echo "<div class='pbox1'><table class='pbox'><tr>\n",
                 "    <td class='pboxi'><div class='papstripc'><div class='papstrip'><div class='papstripi'>\n";
             $this->_papstrip();

@@ -37,7 +37,8 @@ function confHeader() {
     else
         $title = "Paper #$paperId";
 
-    $Conf->header($title, "paper_" . ($mode == "pe" ? "edit" : "view"), actionBar($mode, $prow), false);
+    $Conf->header($title, "paper_" . ($mode == "pe" ? "edit" : "view"),
+                  actionBar($mode, $prow, $paperTable ? $paperTable->mode_buttons_text() : null), false);
 }
 
 function errorMsgExit($msg) {
@@ -887,7 +888,7 @@ if ($paperTable->mode == "pe") {
 $paperTable->initialize($editable, $editable && $useRequest);
 
 // produce paper table
-$paperTable->paptabBegin();
+$paperTable->paptabBegin(true);
 
 if ($paperTable->mode == "r" && !$paperTable->rrow)
     $paperTable->paptabEndWithReviews();
