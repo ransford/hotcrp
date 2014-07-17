@@ -26,7 +26,7 @@ Options -MultiViews
 # Add .php to suffixless URLs.
 <IfModule mod_rewrite.c>
 RewriteEngine on
-RewriteBase /
+RewriteBase /microcrp/
 RewriteCond %{REQUEST_FILENAME}.php -f
 RewriteCond %{REQUEST_URI} ^(.*)$
 RewriteRule ^[^/]*$ %1.php [L,NE]
