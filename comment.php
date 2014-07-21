@@ -59,20 +59,6 @@ if (isset($_REQUEST["post"]) && $_REQUEST["post"] && !count($_POST))
     $Conf->errorMsg("It looks like you tried to upload a gigantic file, larger than I can accept.  The file was ignored.");
 
 
-// set watch preference action
-if (isset($_REQUEST["setwatch"]) && $prow && check_post()) {
-    $ajax = defval($_REQUEST, "ajax", 0);
-    if (!$Me->privChair
-        || ($contactId = rcvtint($_REQUEST["contactId"])) <= 0)
-        $contactId = $Me->cid;
-    saveWatchPreference($prow->paperId, $contactId, WATCHTYPE_COMMENT, defval($_REQUEST, "watch"));
-    if ($OK)
-        $Conf->confirmMsg("Saved");
-    if ($ajax)
-        $Conf->ajaxExit(array("ok" => $OK));
-}
-
-
 // update comment action
 function saveComment($text, $is_response) {
     global $Me, $Conf, $prow, $crow;
@@ -87,7 +73,7 @@ function saveComment($text, $is_response) {
             $q = ($Conf->sversion >= 53 ? "(commentType&" . COMMENTTYPE_RESPONSE . ")!=0" : "forAuthors>1");
             $result = $Conf->qe("select commentId from PaperComment where paperId=$prow->paperId and $q");
             if (($row = edb_row($result)))
-                return $Conf->errorMsg("A paper response has already been entered.  <a href=\"" . hoturl("comment", "c=$row[0]") . "\">Edit that response</a>");
+                return $Conf->errorMsg("A response has already been entered.  <a href=\"" . hoturl("paper", "p=$prow->paperId&amp;c=$row[0]#comment$row[0]") . "\">Edit that response</a>");
         }
         return false;
     }
@@ -119,8 +105,8 @@ function saveComment($text, $is_response) {
 
 if (!check_post())
     /* do nothing */;
-else if ((isset($_REQUEST["submit"]) || isset($_REQUEST["submitresponse"])
-          || isset($_REQUEST["savedraft"]))
+else if ((isset($_REQUEST["submitcomment"]) || isset($_REQUEST["submitresponse"])
+          || isset($_REQUEST["savedraftresponse"]))
          && defval($_REQUEST, "response")) {
     if (!$Me->canRespond($prow, $crow, $whyNot, true)) {
         $Conf->errorMsg(whyNotText($whyNot, "respond to reviews for"));
@@ -130,7 +116,7 @@ else if ((isset($_REQUEST["submit"]) || isset($_REQUEST["submitresponse"])
         $useRequest = true;
     } else
         saveComment($text, true);
-} else if (isset($_REQUEST["submit"])) {
+} else if (isset($_REQUEST["submitcomment"])) {
     if (!$Me->canSubmitComment($prow, $crow, $whyNot)) {
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
         $useRequest = true;
@@ -139,7 +125,7 @@ else if ((isset($_REQUEST["submit"]) || isset($_REQUEST["submitresponse"])
         $useRequest = true;
     } else
         saveComment($text, false);
-} else if (isset($_REQUEST["delete"]) && $crow) {
+} else if (isset($_REQUEST["deletecomment"]) && $crow) {
     if (!$Me->canSubmitComment($prow, $crow, $whyNot)) {
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
         $useRequest = true;
@@ -150,7 +136,7 @@ else if ((isset($_REQUEST["submit"]) || isset($_REQUEST["submitresponse"])
 
 
 // paper actions
-if ((isset($_REQUEST["settags"]) || isset($_REQUEST["settingtags"])) && check_post()) {
+if (isset($_REQUEST["settags"]) && check_post()) {
     PaperActions::setTags($prow);
     loadRows();
 }

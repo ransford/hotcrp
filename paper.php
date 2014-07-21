@@ -89,6 +89,10 @@ if (isset($_REQUEST["rankctx"]) && $prow && check_post()) {
     PaperActions::rankContext($prow);
     loadRows();
 }
+if (isset($_REQUEST["setfollow"]) && $prow && check_post()) {
+    PaperActions::set_follow($prow);
+    loadRows();
+}
 
 
 // check paper action
@@ -848,7 +852,7 @@ if (isset($_REQUEST["delete"]) && check_post()) {
 
 
 // paper actions
-if ((isset($_REQUEST["settags"]) || isset($_REQUEST["settingtags"])) && check_post()) {
+if (isset($_REQUEST["settags"]) && check_post()) {
     PaperActions::setTags($prow);
     loadRows();
 }
