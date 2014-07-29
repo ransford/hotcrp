@@ -17,135 +17,36 @@ $Error = array();
 $Values = array();
 $DateExplanation = "Date examples: “now”, “10 Dec 2006 11:59:59pm PST” <a href='http://www.gnu.org/software/tar/manual/html_section/Date-input-formats.html'>(more examples)</a>";
 $TagStyles = "red|orange|yellow|green|blue|purple|gray|bold|italic|big|small|dim";
-
-$SettingList = array("acct_addr" => "checkbox",
-                     "au_seerev" => 2,
-                     "banal" => "xspecial",
-                     "clickthrough_submit" => "htmlstring",
-                     "cmt_always" => "checkbox",
-                     "decisions" => "xspecial",
-                     "extrev_chairreq" => "checkbox",
-                     "extrev_hard" => "date",
-                     "extrev_soft" => "date",
-                     "extrev_view" => 2,
-                     "final_done" => "date",
-                     "final_grace" => "grace",
-                     "final_open" => "checkbox",
-                     "final_soft" => "date",
-                     "mailbody_requestreview" => "string",
-                     "msg.conflictdef" => "htmlstring",
-                     "msg.home" => "htmlstring",
-                     "msg.responseinstructions" => "htmlstring",
-                     "msg.revprefdescription" => "htmlstring",
-                     "msg.finalsubmit" => "htmlstring",
-                     "opt.contactEmail" => "optemailstring",
-                     "opt.contactName" => "simplestring",
-                     "opt.longName" => "simplestring",
-                     "opt.shortName" => "simplestring",
-                     "options" => "xspecial",
-                     "pc_seeall" => "checkbox",
-                     "pc_seeallrev" => 4,
-                     "pc_seeblindrev" => 1,
-                     "pcrev_any" => "checkbox",
-                     "pcrev_editdelegate" => "checkbox",
-                     "pcrev_hard" => "date",
-                     "pcrev_soft" => "date",
-                     "resp_done" => "date",
-                     "resp_grace" => "grace",
-                     "resp_open" => "checkbox",
-                     "resp_words" => "zint",
-                     "rev_blind" => 2,
-                     "rev_notifychair" => "checkbox",
-                     "rev_open" => "cdate",
-                     "rev_ratings" => 2,
-                     "rev_roundtag" => "special",
-                     "reviewform" => "xspecial",
-                     "seedec" => 3,
-                     "sub_blind" => 3,
-                     "sub_collab" => "checkbox",
-                     "sub_freeze" => 1,
-                     "sub_grace" => "grace",
-                     "sub_open" => "cdate",
-                     "sub_pcconf" => "checkbox",
-                     "sub_pcconfsel" => "checkbox",
-                     "sub_reg" => "date",
-                     "sub_sub" => "date",
-                     "tag_chair" => "special",
-                     "tag_color" => "special",
-                     "tag_rank" => "special",
-                     "tag_seeall" => "checkbox",
-                     "tag_vote" => "special",
-                     "topics" => "xspecial",
-                     "tracks" => "special");
-
-$GroupMapping = array("rev" => "reviews", "rfo" => "reviewform");
+$SettingInfo = json_decode(file_get_contents("$ConfSitePATH/src/settinginfo.json"));
+// maybe set $Opt["contactName"] and $Opt["contactEmail"]
+Contact::site_contact();
 
 $Group = defval($_REQUEST, "group");
-if ($Group === "reviews" || $Group === "review")
-    $Group = "rev";
-if ($Group === "reviewform")
-    $Group = "rfo";
-if (array_search($Group, array("acc", "msg", "sub", "opt", "rev", "rfo", "dec")) === false) {
+if ($Group === "rev" || $Group === "review")
+    $Group = "reviews";
+if ($Group === "rfo")
+    $Group = "reviewform";
+if ($Group === "acc")
+    $Group = "users";
+if (array_search($Group, array("info", "users", "msg", "sub", "opt", "reviews", "reviewform", "dec")) === false) {
     if ($Conf->timeAuthorViewReviews())
         $Group = "dec";
     else if ($Conf->deadlinesAfter("sub_sub") || $Conf->timeReviewOpen())
-        $Group = "rev";
+        $Group = "reviews";
     else
         $Group = "sub";
 }
 if ($Group == "rfo")
     require_once("src/reviewsetform.php");
-if ($Group == "acc")
+if ($Group == "users")
     require_once("src/contactlist.php");
 
 
-$SettingText = array(
-        "sub_open" => "Submissions open setting",
-        "sub_reg" => "Paper registration deadline",
-        "sub_sub" => "Paper submission deadline",
-        "rev_open" => "Reviews open setting",
-        "cmt_always" => "Comments open setting",
-        "pcrev_soft" => "PC soft review deadline",
-        "pcrev_hard" => "PC hard review deadline",
-        "extrev_soft" => "External reviewer soft review deadline",
-        "extrev_hard" => "External reviewer hard review deadline",
-        "sub_grace" => "Submissions grace period",
-        "sub_blind" => "Blind submission setting",
-        "rev_blind" => "Blind review setting",
-        "sub_pcconf" => "Collect PC conflicts setting",
-        "sub_pcconfsel" => "Collect conflict types setting",
-        "sub_collab" => "Collect collaborators setting",
-        "acct_addr" => "Collect addresses setting",
-        "sub_freeze" => "Submitters can update until the deadline setting",
-        "rev_notifychair" => "Notify chairs about reviews setting",
-        "pc_seeall" => "PC can see all papers setting",
-        "pcrev_any" => "PC can review any paper setting",
-        "extrev_chairreq" => "PC chair must approve proposed external reviewers setting",
-        "pcrev_editdelegate" => "PC members can edit delegated reviews setting",
-        "pc_seeallrev" => "PC can see all reviews setting",
-        "pc_seeblindrev" => "PC can see blind reviewer identities setting",
-        "extrev_view" => "External reviewers can view reviews setting",
-        "tag_chair" => "Chair tags",
-        "tag_vote" => "Voting tags",
-        "tag_rank" => "Rank tag",
-        "tag_color" => "Tag colors",
-        "tag_seeall" => "PC can see tags for conflicted papers",
-        "rev_ratings" => "Review ratings setting",
-        "au_seerev" => "Authors can see reviews setting",
-        "seedec" => "Decision visibility",
-        "final_open" => "Collect final versions setting",
-        "final_soft" => "Final version upload deadline",
-        "final_done" => "Final version upload hard deadline",
-        "msg.home" => "Home page message",
-        "msg.conflictdef" => "Definition of conflict of interest",
-        "msg.responseinstructions" => "Authors’ response instructions",
-        "msg.revprefdescription" => "Review preference instructions",
-        "msg.finalsubmit" => "Final version submission notice",
-        "clickthrough_submit" => "Clickthrough submission terms",
-        "mailbody_requestreview" => "Mail template for external review requests",
-        "opt.contactName" => "Name of site contact",
-        "opt.contactEmail" => "Email of site contact"
-        );
+function setting_info($n, $k = null) {
+    global $SettingInfo;
+    $x = @$SettingInfo->$n ? : (object) array();
+    return $k ? @$x->$k : $x;
+}
 
 function parseGrace($v) {
     $t = 0;
@@ -197,35 +98,47 @@ function expandMailTemplate($name, $default) {
     return $nullMailer->expandTemplate($name, $default);
 }
 
-function parseValue($name, $type) {
-    global $Conf, $SettingText, $Error, $Highlight, $Now;
+function unparse_setting_error($info, $text) {
+    if (@$info->name)
+        return "$info->name: $text";
+    else
+        return $text;
+}
+
+function parseValue($name, $info) {
+    global $Conf, $Error, $Highlight, $Now, $Opt;
 
     if (!isset($_REQUEST[$name]))
         return null;
     $v = trim($_REQUEST[$name]);
+    if (@$info->temptext && $info->temptext === $v)
+        $v = "";
+    $opt_value = null;
+    if (substr($name, 0, 4) === "opt.")
+        $opt_value = @$Opt[substr($name, 4)];
 
-    if ($type === "checkbox")
+    if ($info->type === "checkbox")
         return $v != "";
-    else if ($type === "cdate" && $v == "1")
+    else if ($info->type === "cdate" && $v == "1")
         return 1;
-    else if ($type === "date" || $type === "cdate") {
+    else if ($info->type === "date" || $info->type === "cdate") {
         if ($v == "" || strtoupper($v) == "N/A" || $v == "0")
             return -1;
         else if (($v = $Conf->parse_time($v)) !== false)
             return $v;
         else
-            $err = $SettingText[$name] . ": invalid date.";
-    } else if ($type === "grace") {
+            $err = unparse_setting_error($info, "Invalid date.");
+    } else if ($info->type === "grace") {
         if (($v = parseGrace($v)) !== null)
             return intval($v);
         else
-            $err = $SettingText[$name] . ": invalid grace period.";
-    } else if ($type === "int" || $type === "zint") {
+            $err = unparse_setting_error($info, "Invalid grace period.");
+    } else if ($info->type === "int" || $info->type === "zint") {
         if (preg_match("/\\A[-+]?[0-9]+\\z/", $v))
             return intval($v);
         else
-            $err = $SettingText[$name] . ": should be a number.";
-    } else if ($type === "string") {
+            $err = unparse_setting_error($info, "Should be a number.");
+    } else if ($info->type === "string") {
         // Avoid storing the default message in the database
         if (substr($name, 0, 9) == "mailbody_") {
             $t = expandMailTemplate(substr($name, 9), true);
@@ -233,21 +146,27 @@ function parseValue($name, $type) {
             if ($t["body"] == $v)
                 return 0;
         }
-        return ($v == "" ? 0 : array(0, $v));
-    } else if ($type === "simplestring") {
+        return ($v == "" && !$opt_value ? 0 : array(0, $v));
+    } else if ($info->type === "simplestring") {
         $v = simplify_whitespace($v);
-        return ($v == "" ? 0 : array(0, $v));
-    } else if ($type === "emailstring" || $type === "optemailstring") {
+        return ($v == "" && !$opt_value ? 0 : array(0, $v));
+    } else if ($info->type === "emailheader") {
+        $v = Mailer::mimeEmailHeader("", $v);
+        if ($v !== false)
+            return ($v == "" && !$opt_value ? 0 : array(0, Mailer::mimeHeaderUnquote($v)));
+        else
+            $err = unparse_setting_error($info, "Invalid email header.");
+    } else if ($info->type === "emailstring") {
         $v = trim($v);
-        if ($v === "" && $type === "optemailstring")
+        if ($v === "" && @$info->optional)
             return 0;
-        else if (validate_email($v))
+        else if (validate_email($v) || $v === $opt_value)
             return ($v == "" ? 0 : array(0, $v));
         else
-            $err = $SettingText[$name] . ": invalid email.";
-    } else if ($type === "htmlstring") {
+            $err = unparse_setting_error($info, "Invalid email." . var_export($opt_value,true));
+    } else if ($info->type === "htmlstring") {
         if (($v = CleanHTML::clean($v, $err)) === false)
-            $err = $SettingText[$name] . ": $err";
+            $err = unparse_setting_error($info, $err);
         else if (str_starts_with($name, "msg.")
                  && $v === $Conf->message_default_html($name))
             return 0;
@@ -255,11 +174,11 @@ function parseValue($name, $type) {
             return null;
         else
             return ($v == "" ? 0 : array($Now, $v));
-    } else if (is_int($type)) {
-        if (ctype_digit($v) && $v >= 0 && $v <= $type)
-            return intval($v);
-        else
-            $err = $SettingText[$name] . ": parse error on “" . htmlspecialchars($v) . "”.";
+    } else if ($info->type === "radio") {
+        foreach ($info->values as $allowedv)
+            if ((string) $allowedv === $v)
+                return $allowedv;
+        $err = unparse_setting_error($info, "Parse error (unexpected value).");
     } else
         return $v;
 
@@ -397,15 +316,19 @@ function doTopics($set) {
         return;
     }
 
-    $numnew = defval($_REQUEST, "newtopcount", 50);
     $tmap = $Conf->topic_map();
-    foreach ($_REQUEST as $k => $v) {
-        if (!(strlen($k) > 3 && $k[0] == "t" && $k[1] == "o" && $k[2] == "p"))
-            continue;
-        $v = simplify_whitespace($v);
-        if ($k[3] == "n" && $v != "" && !ctype_digit($v) && cvtint(substr($k, 4), 100) <= $numnew)
-            $Conf->qe("insert into TopicArea (topicName) values ('" . sqlq($v) . "')");
-        else if (($k = cvtint(substr($k, 3), -1)) >= 0) {
+    foreach ($_REQUEST as $k => $v)
+        if ($k === "topnew") {
+            $news = array();
+            foreach (explode("\n", $v) as $n)
+                if (($n = simplify_whitespace($n)) !== "")
+                    $news[] = "('" . sqlq($n) . "')";
+            if (count($news))
+                $Conf->qe("insert into TopicArea (topicName) values " . join(",", $news));
+        } else if (strlen($k) > 3 && substr($k, 0, 3) === "top"
+                   && ctype_digit(substr($k, 3))) {
+            $k = (int) substr($k, 3);
+            $v = simplify_whitespace($v);
             if ($v == "") {
                 $Conf->qe("delete from TopicArea where topicId=$k");
                 $Conf->qe("delete from PaperTopic where topicId=$k");
@@ -413,7 +336,6 @@ function doTopics($set) {
             } else if (isset($tmap[$k]) && $v != $tmap[$k] && !ctype_digit($v))
                 $Conf->qe("update TopicArea set topicName='" . sqlq($v) . "' where topicId=$k");
         }
-    }
 }
 
 
@@ -853,28 +775,24 @@ function truthy($x) {
              || $x === "" || $x === "0" || $x === "false");
 }
 
-function accountValue($name, $type) {
+function accountValue($name, $info) {
     global $Values;
-    $xname = $name;
-    if (($dot = strpos($name, ".")) !== false) {
-        $xname = str_replace(".", "_", $name);
-        if (isset($_REQUEST[$xname]))
-            $_REQUEST[$name] = $_REQUEST[$xname];
-    }
-
-    if ($type === "special" || $type === "xspecial") {
+    $xname = str_replace(".", "_", $name);
+    if (isset($_REQUEST[$xname]) && !isset($_REQUEST[$name]))
+        $_REQUEST[$name] = $_REQUEST[$xname];
+    if ($info->type === "special") {
         if (truthy(@$_REQUEST["has_$xname"]))
             doSpecial($name, false);
-    } else if (isset($_REQUEST[$xname])
-               || (($type === "cdate" || $type === "checkbox")
+    } else if (isset($_REQUEST[$name])
+               || (($info->type === "cdate" || $info->type === "checkbox")
                    && truthy(@$_REQUEST["has_$xname"]))) {
-        $v = parseValue($name, $type);
+        $v = parseValue($name, $info);
         if ($v === null) {
-            if ($type !== "cdate" && $type !== "checkbox")
+            if ($info->type !== "cdate" && $info->type !== "checkbox")
                 return;
             $v = 0;
         }
-        if (!is_array($v) && $v <= 0 && !is_int($type) && $type !== "zint")
+        if (!is_array($v) && $v <= 0 && $info->type !== "radio" && $info->type !== "zint")
             $Values[$name] = null;
         else
             $Values[$name] = $v;
@@ -899,8 +817,8 @@ function value_or_setting($name) {
 
 if (isset($_REQUEST["update"]) && check_post()) {
     // parse settings
-    foreach ($SettingList as $name => $type)
-        accountValue($name, $type);
+    foreach ($SettingInfo as $name => $info)
+        accountValue($name, $info);
 
     // check date relationships
     foreach (array("sub_reg" => "sub_sub", "pcrev_soft" => "pcrev_hard",
@@ -912,7 +830,7 @@ if (isset($_REQUEST["update"]) && check_post()) {
             if ($Values[$second] && !$Values[$first])
                 $Values[$first] = $Values[$second];
             else if ($Values[$second] && $Values[$first] > $Values[$second]) {
-                $Error[] = $SettingText[$first] . " must come before " . $SettingText[$second] . ".";
+                $Error[] = unparse_setting_error($SettingInfo->$first, "Must come before " . setting_info($second, "name") . ".");
                 $Highlight[$first] = true;
                 $Highlight[$second] = true;
             }
@@ -923,8 +841,6 @@ if (isset($_REQUEST["update"]) && check_post()) {
     // so we can join on later review changes
     if (value("resp_open") > 0 && $Conf->setting("resp_open") <= 0)
         $Values["resp_open"] = $Now;
-    if (@($Values["opt.longName"][1] === "(same as abbreviation)"))
-        $Values["opt.longName"][1] = "";
     if (array_key_exists("opt.contactName", $Values)
         || array_key_exists("opt.contactEmail", $Values)) {
         $site_contact = Contact::site_contact();
@@ -993,19 +909,26 @@ if (isset($_REQUEST["update"]) && check_post()) {
 
         // apply settings
         foreach ($Values as $n => $v)
-            if (@$SettingList[$n] == "special" || @$SettingList[$n] == "xspecial")
+            if (setting_info($n, "type") == "special")
                 doSpecial($n, true);
 
         $dq = $aq = "";
         foreach ($Values as $n => $v)
-            if (@$SettingList[$n] != "xspecial") {
+            if (!setting_info($n, "nodb")) {
                 $dq .= " or name='$n'";
+                if (substr($n, 0, 4) === "opt.") {
+                    $okey = substr($n, 4);
+                    $oldv = (array_key_exists($okey, $OptOverride) ? $OptOverride[$okey] : @$Opt[$okey]);
+                    $Opt[$okey] = (is_array($v) ? $v[1] : $v);
+                    if ($oldv === $Opt[$okey])
+                        continue; // do not save value in database
+                    else if (!array_key_exists($okey, $OptOverride))
+                        $OptOverride[$okey] = $oldv;
+                }
                 if (is_array($v))
                     $aq .= ", ('$n', '" . sqlq($v[0]) . "', '" . sqlq($v[1]) . "')";
                 else if ($v !== null)
                     $aq .= ", ('$n', '" . sqlq($v) . "', null)";
-                if (substr($n, 0, 4) === "opt.")
-                    $Opt[substr($n, 4)] = (is_array($v) ? $v[1] : $v);
             }
         if (strlen($dq))
             $Conf->qe("delete from Settings where " . substr($dq, 4));
@@ -1169,12 +1092,13 @@ function doActionArea($top) {
 function doAccGroup() {
     global $Conf, $Me, $belowHr;
 
-    doCheckbox("acct_addr", "Collect users&rsquo; addresses and phone numbers");
+    if (setting("acct_addr"))
+        doCheckbox("acct_addr", "Collect users’ addresses and phone numbers");
 
     echo "<h3 class=\"settings g\">Program committee &amp; system administrators</h3>";
 
     echo "<p><a href='", hoturl("profile", "u=new"), "' class='button'>Create account</a> &nbsp;|&nbsp; ",
-        "Select a user&rsquo;s name to edit a profile.</p>\n";
+        "Select a user’s name to edit a profile.</p>\n";
     $pl = new ContactList($Me, false);
     echo $pl->text("pcadminx", hoturl("users", "t=pcadmin"));
 }
@@ -1198,34 +1122,45 @@ function do_message($name, $description, $type, $rows = 10, $hint = "") {
         '</textarea></div><div class="g"></div>', "\n";
 }
 
-function doMsgGroup() {
+function doInfoGroup() {
     global $Conf, $Opt;
 
-    echo "<div class='f-c'>", setting_label("opt.shortName", "Conference abbreviation"), "</div>\n",
+    echo '<div class="f-c">', setting_label("opt.shortName", "Conference abbreviation"), "</div>\n",
         Ht::entry("opt.shortName", opt_data("shortName"), array("class" => "textlite", "size" => 20)),
-        "<div class='f-h'>Examples: “HotOS XIV”, “NSDI '14”</div>",
-        "<div class='g'></div>\n";
+        '<div class="f-h">Examples: “HotOS XIV”, “NSDI \'14”</div>',
+        '<div class="g"></div>', "\n";
 
     $long = opt_data("longName");
     if ($long == opt_data("shortName"))
         $long = "";
     echo "<div class='f-c'>", setting_label("opt.longName", "Conference name"), "</div>\n",
         Ht::entry("opt.longName", $long, array("class" => "textlite", "size" => 70, "hottemptext" => "(same as abbreviation)")),
-        "<div class='f-h'>Example: “14th Workshop on Hot Topics in Operating Systems”</div>",
-        "<div class='lg'></div>\n";
+        '<div class="f-h">Example: “14th Workshop on Hot Topics in Operating Systems”</div>';
 
-    // maybe set $Opt["contactName"] and $Opt["contactEmail"]
-    Contact::site_contact();
 
-    echo "<div class='f-c'>", setting_label("opt.contactName", "Name of site contact"), "</div>\n",
+    echo '<div class="lg"></div>', "\n";
+
+    echo '<div class="f-c">', setting_label("opt.contactName", "Name of site contact"), "</div>\n",
         Ht::entry("opt.contactName", opt_data("contactName", null, "Your Name"), array("class" => "textlite", "size" => 50)),
-        "<div class='g'></div>\n";
+        '<div class="g"></div>', "\n";
 
     echo "<div class='f-c'>", setting_label("opt.contactEmail", "Email of site contact"), "</div>\n",
         Ht::entry("opt.contactEmail", opt_data("contactEmail", null, "you@example.com"), array("class" => "textlite", "size" => 40)),
-        "<div class='f-h'>The site contact is the contact point for users if something goes wrong. It defaults to the chair.</div>",
-        "<div class='lg'></div>\n";
+        '<div class="f-h">The site contact is the contact point for users if something goes wrong. It defaults to the chair.</div>';
 
+
+    echo '<div class="lg"></div>', "\n";
+
+    echo '<div class="f-c">', setting_label("opt.emailReplyTo", "Reply-To field for email"), "</div>\n",
+        Ht::entry("opt.emailReplyTo", opt_data("emailReplyTo"), array("class" => "textlite", "size" => 80, "hottemptext" => "(none)")),
+        '<div class="g"></div>', "\n";
+
+    echo '<div class="f-c">', setting_label("opt.emailCc", "Default Cc for reviewer email"), "</div>\n",
+        Ht::entry("opt.emailCc", opt_data("emailCc"), array("class" => "textlite", "size" => 80, "hottemptext" => "(none)")),
+        '<div class="f-h">This applies to email sent to reviewers and email sent using the <a href="', hoturl("mail"), '">mail tool</a>. It doesn’t apply to account-related email or email sent to submitters.</div>';
+}
+
+function doMsgGroup() {
     do_message("msg.home", "Home page message", 0);
     do_message("clickthrough_submit", "Clickthrough submission terms", 0, 10,
                "<div class=\"hint fx\">Users must “accept” these terms to edit or submit a paper. Use HTML, and consider including a headline, such as “&lt;h2&gt;Submission terms&lt;/h2&gt;”.</div>");
@@ -1253,8 +1188,8 @@ function doSubGroup() {
     echo "</table>\n";
 
     echo "<div class='g'></div>\n<table id='foldpcconf' class='fold",
-        ($Conf->setting("sub_pcconf") ? "o" : "c"), "'>\n";
-    doCheckbox("sub_pcconf", "Collect authors&rsquo; PC conflicts", true,
+        (setting("sub_pcconf") ? "o" : "c"), "'>\n";
+    doCheckbox("sub_pcconf", "Collect authors’ PC conflicts", true,
                "void fold('pcconf',!this.checked)");
     echo "<tr class='fx'><td></td><td>";
     doCheckbox("sub_pcconfsel", "Collect PC conflict types (“Advisor/student,” “Recent collaborator,” etc.)");
@@ -1265,7 +1200,7 @@ function doSubGroup() {
     if (is_executable("src/banal")) {
         echo "<div class='g'></div>",
             Ht::hidden("has_banal", 1),
-            "<table id='foldbanal' class='", ($Conf->setting("sub_banal") ? "foldo" : "foldc"), "'>";
+            "<table id='foldbanal' class='", (setting("sub_banal") ? "foldo" : "foldc"), "'>";
         doCheckbox("sub_banal", "<strong>Automated format checker<span class='fx'>:</span></strong>", true, "void fold('banal',!this.checked)");
         echo "<tr class='fx'><td></td><td class='top'><table>";
         $bsetting = explode(";", preg_replace("/>.*/", "", $Conf->setting_data("sub_banal", "")));
@@ -1452,7 +1387,7 @@ function doOptGroupOption($o) {
 }
 
 function doOptGroup() {
-    global $Conf;
+    global $Conf, $Error;
 
     echo "<h3 class=\"settings\">Submission options</h3>\n";
     echo "Options are selected by authors at submission time.  Examples have included “PC-authored paper,” “Consider this paper for a Best Student Paper award,” and “Allow the shadow PC to see this paper.”  The “option name” should be brief (“PC paper,” “Best Student Paper,” “Shadow PC”).  The optional description can explain further and may use XHTML.  ";
@@ -1494,17 +1429,21 @@ function doOptGroup() {
         Ht::hidden("has_topics", 1),
         "<table id='newtoptable' class='", ($ninterests ? "foldo" : "foldc"), "'>";
     echo "<tr><th colspan='2'></th><th class='fx'><small>Low</small></th><th class='fx'><small>High</small></th></tr>";
-    $td1 = "<td class='lcaption'>Current</td>";
+    $td1 = '<td class="lcaption">Current</td>';
     foreach ($Conf->topic_map() as $tid => $tname) {
-        echo "<tr>$td1<td class='lentry'><input type='text' class='textlite' name='top$tid' value=\"", htmlspecialchars($tname), "\" size='40' /></td>";
+        if (count($Error) > 0 && isset($_REQUEST["top$tid"]))
+            $tname = $_REQUEST["top$tid"];
+        echo '<tr>', $td1, '<td class="lentry">',
+            Ht::entry("top$tid", $tname, array("size" => 40, "class" => "textlite", "style" => "width:20em")),
+            '</td>';
 
         $tinterests = defval($interests, $tid, array());
-        echo "<td class='fx rpentry'>", (@$tinterests[0] ? "<span class='topic-2'>" . $tinterests[0] . "</span>" : ""), "</td>",
-            "<td class='fx rpentry'>", (@$tinterests[1] ? "<span class='topic2'>" . $tinterests[1] . "</span>" : ""), "</td>";
+        echo '<td class="fx rpentry">', (@$tinterests[0] ? '<span class="topic-2">' . $tinterests[0] . "</span>" : ""), "</td>",
+            '<td class="fx rpentry">', (@$tinterests[1] ? '<span class="topic2">' . $tinterests[1] . "</span>" : ""), "</td>";
 
         if ($td1 !== "<td></td>") {
             // example search
-            echo "<td class='llentry' style='vertical-align: top' rowspan='40'><div class='f-i'>",
+            echo "<td class='llentry' style='vertical-align:top' rowspan='40'><div class='f-i'>",
                 "<div class='f-c'>Example search</div>";
             $oabbrev = strtolower($tname);
             if (strstr($oabbrev, " ") !== false)
@@ -1520,14 +1459,9 @@ function doOptGroup() {
         echo "</tr>\n";
         $td1 = "<td></td>";
     }
-    $td1 = "<td class='lcaption' rowspan='40'>New<br /><small><a href='#' onclick='return authorfold(\"newtop\",1,1)'>More</a> | <a href='#' onclick='return authorfold(\"newtop\",1,-1)'>Fewer</a></small></td>";
-    for ($i = 1; $i <= 40; $i++) {
-        echo "<tr id='newtop$i' class='auedito'>$td1<td class='lentry'><input type='text' class='textlite' name='topn$i' value=\"\" size='40' /></td></tr>\n";
-        $td1 = "";
-    }
-    echo "</table>",
-        Ht::hidden("newtopcount", 40, array("id" => "newtopcount"));
-    $Conf->echoScript("authorfold(\"newtop\",0,3)");
+    echo '<tr><td class="lcaption top" rowspan="40">New<br><span class="hint">Enter one topic per line.</span></td><td class="lentry top">',
+        Ht::textarea("topnew", count($Error) ? @$_REQUEST["topnew"] : "", array("cols" => 40, "rows" => 2, "style" => "width:20em", "class" => "textlite")),
+        '</td></tr></table>';
 }
 
 // Reviews
@@ -1592,7 +1526,7 @@ function doRevGroup() {
                                Conference::BLIND_OPTIONAL => "Depends—reviewers decide whether to expose their names"));
 
     echo "<div class='g'></div>\n";
-    doCheckbox('rev_notifychair', 'PC chairs are notified of new reviews by email');
+    doCheckbox('rev_notifychair', 'Notify PC chairs of new reviews by email');
 
 
     // Review visibility
@@ -1610,8 +1544,8 @@ function doRevGroup() {
                                     1 => "Only after completing a review for the same paper<br /><span class='hint'>This setting also hides reviewer-only comments from PC members who have not completed a review for the paper.</span>"));
 
     echo "<div class='g'></div>";
-    echo "Can external reviewers see the other reviews for their assigned papers, once they&rsquo;ve submitted their own?<br />\n";
-    doRadio("extrev_view", array(2 => "Yes", 1 => "Yes, but they can&rsquo;t see who wrote blind reviews", 0 => "No"));
+    echo "Can external reviewers see the other reviews for their assigned papers, once they’ve submitted their own?<br />\n";
+    doRadio("extrev_view", array(2 => "Yes", 1 => "Yes, but they can’t see who wrote blind reviews", 0 => "No"));
 
 
     // PC reviews
@@ -1763,7 +1697,7 @@ function doDecGroup() {
 
     // doCheckbox('au_seerev', '<b>Authors can see reviews</b>');
     echo "Can <b>authors see reviews and comments</b> for their papers?<br />";
-    doRadio("au_seerev", array(AU_SEEREV_NO => "No", AU_SEEREV_ALWAYS => "Yes", AU_SEEREV_YES => "Yes, once they&rsquo;ve completed any requested reviews"));
+    doRadio("au_seerev", array(AU_SEEREV_NO => "No", AU_SEEREV_ALWAYS => "Yes", AU_SEEREV_YES => "Yes, once they’ve completed any requested reviews"));
 
     echo "<div class='g'></div>\n<table id='foldauresp' class='fold2o'>";
     doCheckbox('resp_open', "<b>Collect authors’ responses to the reviews<span class='fx2'>:</span></b>", true, "void fold('auresp',!this.checked,2)");
@@ -1858,19 +1792,19 @@ echo Ht::form(hoturl_post("settings"), array("id" => "settingsform")), "<div>",
 
 echo "<table class='settings'><tr><td class='caption initial final'>";
 echo "<table class='lhsel'>";
-foreach (array("acc" => "Accounts",
+foreach (array("info" => "Conference information",
+               "users" => "Accounts",
                "msg" => "Messages",
                "sub" => "Submissions",
                "opt" => "Submission options",
-               "rev" => "Reviews",
-               "rfo" => "Review form",
+               "reviews" => "Reviews",
+               "reviewform" => "Review form",
                "dec" => "Decisions") as $k => $v) {
-    $kk = defval($GroupMapping, $k, $k);
     echo "<tr><td>";
     if ($Group == $k)
-        echo "<div class='lhl1'><a class='q' href='", hoturl("settings", "group=$kk"), "'>$v</a></div>";
+        echo "<div class='lhl1'><a class='q' href='", hoturl("settings", "group=$k"), "'>$v</a></div>";
     else
-        echo "<div class='lhl0'><a href='", hoturl("settings", "group=$kk"), "'>$v</a></div>";
+        echo "<div class='lhl0'><a href='", hoturl("settings", "group=$k"), "'>$v</a></div>";
     echo "</td></tr>";
 }
 echo "</table></td><td class='top'><div class='lht'>";
@@ -1882,7 +1816,9 @@ if (!function_exists("imagecreate"))
 echo "<div class='aahc'>";
 doActionArea(true);
 
-if ($Group == "acc")
+if ($Group == "info")
+    doInfoGroup();
+else if ($Group == "users")
     doAccGroup();
 else if ($Group == "msg")
     doMsgGroup();
@@ -1890,16 +1826,19 @@ else if ($Group == "sub")
     doSubGroup();
 else if ($Group == "opt")
     doOptGroup();
-else if ($Group == "rev")
+else if ($Group == "reviews")
     doRevGroup();
-else if ($Group == "rfo")
+else if ($Group == "reviewform")
     doRfoGroup();
-else
+else {
+    if ($Group != "dec")
+        error_log("bad settings group $Group");
     doDecGroup();
+}
 
 doActionArea(false);
 echo "</div></div></td></tr>
 </table></div></form>\n";
 
-$Conf->footerScript("hiliter_children('#settingsform')");
+$Conf->footerScript("hiliter_children('#settingsform');jQuery('textarea').autogrow()");
 $Conf->footer();

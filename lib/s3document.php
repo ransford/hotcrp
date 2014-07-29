@@ -22,6 +22,8 @@ class S3Document {
     public $response_headers;
     public $user_data;
 
+    static public $retry_timeout_allowance = 4; // in seconds
+
     function __construct($opt = array()) {
         $this->s3_key = @$opt["key"];
         $this->s3_secret = @$opt["secret"];
@@ -173,17 +175,28 @@ class S3Document {
         }
     }
 
-    private function run($filename, $method, $args) {
+    private function run_once($filename, $method, $args) {
         $this->status = $this->status_text = null;
         $this->response_headers = $this->user_data = array();
-        if ($filename) {
-            list($url, $hdr) = $this->http_headers($filename, $method, $args);
-            $context = stream_context_create(array("http" => $hdr));
-            if (($stream = fopen($url, "r", false, $context))) {
-                $this->parse_response_headers($url, stream_get_meta_data($stream));
-                $this->response_headers["content"] = stream_get_contents($stream);
-                fclose($stream);
-            }
+        list($url, $hdr) = $this->http_headers($filename, $method, $args);
+        $context = stream_context_create(array("http" => $hdr));
+        if (($stream = fopen($url, "r", false, $context))) {
+            $this->parse_response_headers($url, stream_get_meta_data($stream));
+            $this->response_headers["content"] = stream_get_contents($stream);
+            fclose($stream);
+        }
+    }
+
+    private function run($filename, $method, $args) {
+        for ($i = 1; $i <= 5; ++$i) {
+            $this->run_once($filename, $method, $args);
+            if (($this->status !== null && $this->status !== 500)
+                || self::$retry_timeout_allowance <= 0)
+                return;
+            error_log("S3 warning: $method $filename: retrying");
+            $timeout = 0.005 * (1 << $i);
+            self::$retry_timeout_allowance -= $timeout;
+            usleep(1000000 * $timeout);
         }
     }
 
@@ -213,12 +226,12 @@ class S3Document {
     }
 
     public function ls($prefix, $args = array()) {
-        $url = "?prefix=" . urlencode($prefix);
+        $suffix = "?prefix=" . urlencode($prefix);
         foreach (array("marker", "max-keys") as $k)
             if (isset($args[$k]))
-                $url .= "&" . $k . "=" . urlencode($args[$k]);
-        $this->run($url, "GET", array());
-        return $this->response_headers["content"];
+                $suffix .= "&" . $k . "=" . urlencode($args[$k]);
+        $this->run($suffix, "GET", array());
+        return @$this->response_headers["content"];
     }
 
 }

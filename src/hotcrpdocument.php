@@ -123,13 +123,14 @@ class HotCRPDocument {
         }
         $s3 = self::s3_document();
         $dtype = isset($doc->documentType) ? $doc->documentType : $this->dtype;
-        $meta = json_encode(array("conf" => $Opt["conferenceId"],
+        $meta = json_encode(array("conf" => $Opt["dbName"],
                                   "pid" => (int) $docinfo->paperId,
                                   "dtype" => (int) $dtype));
-        $s3->save(self::s3_filename($doc), $doc->content, $doc->mimetype,
+        $filename = self::s3_filename($doc);
+        $s3->save($filename, $doc->content, $doc->mimetype,
                   array("hotcrp" => $meta));
         if ($s3->status != 200)
-            error_log("S3 error: $s3->status $s3->status_text " . json_encode($s3->response_headers));
+            error_log("S3 error: POST $filename: $s3->status $s3->status_text " . json_encode($s3->response_headers));
         return $s3->status == 200;
     }
 
@@ -212,12 +213,13 @@ class HotCRPDocument {
         }
 
         if (!$ok && ($s3 = self::s3_document())) {
-            $content = $s3->load(self::s3_filename($doc));
+            $filename = self::s3_filename($doc);
+            $content = $s3->load($filename);
             if ($content !== "" && $content !== null) {
                 $doc->content = $content;
                 $ok = true;
             } else if ($s3->status != 200)
-                error_log("S3 error: $s3->status $s3->status_text " . json_encode($s3->response_headers));
+                error_log("S3 error: GET $filename: $s3->status $s3->status_text " . json_encode($s3->response_headers));
         }
 
         if (!$ok) {
@@ -235,19 +237,17 @@ class HotCRPDocument {
     }
 
     static function url($doc) {
-        global $ConfSiteBase, $ConfSiteSuffix;
         assert(property_exists($doc, "mimetype") && isset($doc->documentType));
         if ($doc->mimetype)
-            return $ConfSiteBase . "doc$ConfSiteSuffix/" . self::filename($doc);
+            $f = "file=" . urlencode(self::filename($doc));
         else {
-            $x = $ConfSiteBase . "doc$ConfSiteSuffix?p=" . $doc->paperId;
+            $f = "p=$doc->paperId";
             if ($doc->documentType == DTYPE_FINAL)
-                return $x . "&amp;final=1";
+                $f .= "&amp;final=1";
             else if ($doc->documentType > 0)
-                return $x . "&amp;dt=$doc->documentType";
-            else
-                return $x;
+                $f .= "&amp;dt=$doc->documentType";
         }
+        return hoturl("doc", $f);
     }
 
 }

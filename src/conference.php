@@ -123,7 +123,7 @@ class Conference {
     //
 
     function load_settings() {
-        global $Opt, $OK;
+        global $Opt, $OptOverride, $OK;
 
         // load settings from database
         $this->settings = array();
@@ -135,12 +135,16 @@ class Conference {
             $this->settings[$row[0]] = (int) $row[1];
             if ($row[2] !== null)
                 $this->settingTexts[$row[0]] = $row[2];
-            if (substr($row[0], 0, 4) == "opt.")
-                $Opt[substr($row[0], 4)] = ($row[2] === null ? $row[1] : $row[2]);
+            if (substr($row[0], 0, 4) == "opt.") {
+                $okey = substr($row[0], 4);
+                if (!array_key_exists($okey, $OptOverride))
+                    $OptOverride[$okey] = @$Opt[$okey];
+                $Opt[$okey] = ($row[2] === null ? $row[1] : $row[2]);
+            }
         }
 
         // update schema
-        if ($this->settings["allowPaperOption"] < 77) {
+        if ($this->settings["allowPaperOption"] < 79) {
             require_once("updateschema.php");
             $oldOK = $OK;
             updateSchema($this);
@@ -261,8 +265,6 @@ class Conference {
             $Opt["shortName"] = $Opt["longName"];
         if (!isset($Opt["downloadPrefix"]) || $Opt["downloadPrefix"] == "")
             $Opt["downloadPrefix"] = $confid . "-";
-        if (!isset($Opt["conferenceId"]) || $Opt["conferenceId"] == "")
-            $Opt["conferenceId"] = $confid;
 
         // expand ${confid}, ${confshortname}
         foreach (array("sessionName", "downloadPrefix", "conferenceSite",
@@ -947,6 +949,9 @@ class Conference {
         return $this->settingsAfter('au_seerev');
     }
 
+    function submission_blindness() {
+        return $this->settings["sub_blind"];
+    }
     function subBlindAlways() {
         return $this->settings["sub_blind"] == self::BLIND_ALWAYS;
     }
@@ -2004,15 +2009,14 @@ class Conference {
             }
 
             // "act as" link
-            if (($trueuser = @$_SESSION["trueuser"])) {
-                $trueuser = explode(" ", $trueuser);
+            if (($actas = @$_SESSION["last_actas"])) {
                 // Become true user if not currently chair.
-                if (!@$trueuser[3] || !$Me->privChair
-                    || strcasecmp($Me->email, $trueuser[3]) == 0
-                    || strcasecmp($Me->email, $trueuser[2]) != 0)
-                    $trueuser[3] = $trueuser[2];
-                if (strcasecmp($trueuser[3], $Me->email) != 0)
-                    echo "<a href=\"", selfHref(array("actas" => $trueuser[3])), "\">", ($Me->privChair ? htmlspecialchars($trueuser[3]) : "Admin"), "&nbsp;", Ht::img("viewas.png", "Act as " . htmlspecialchars($trueuser[3])), "</a>", $xsep;
+                if (!$Me->privChair || strcasecmp($Me->email, $actas) == 0) {
+                    $actas = explode(" ", $_SESSION["trueuser"]);
+                    $actas = $actas[2];
+                }
+                if (strcasecmp($Me->email, $actas) != 0)
+                    echo "<a href=\"", selfHref(array("actas" => $actas)), "\">", ($Me->privChair ? htmlspecialchars($actas) : "Admin"), "&nbsp;", Ht::img("viewas.png", "Act as " . htmlspecialchars($actas)), "</a>", $xsep;
             }
 
             // help, sign out

@@ -9,6 +9,8 @@ function go($url = false) {
 
 function error_go($url, $message) {
     global $Conf;
+    if ($url === false)
+        $url = hoturl("index");
     $Conf->errorMsg($message);
     go($url);
 }
@@ -52,6 +54,10 @@ function ensure_session() {
     }
     session_name($sn);
     session_cache_limiter("");
+    if (isset($_COOKIE[$sn]) && !preg_match(';\A[-a-zA-Z0-9,]{1,128}\z;', $_COOKIE[$sn])) {
+        error_log("unexpected session ID <" . $_COOKIE[$sn] . "> for conference " . $Opt["confid"]);
+        unset($_COOKIE[$sn]);
+    }
     session_start();
     return true;
 }
@@ -59,11 +65,11 @@ function ensure_session() {
 function post_value() {
     ensure_session();
     if (($sid = session_id()) !== "") {
-	if (strlen($sid) > 16)
-	    $sid = substr($sid, 8);
-	$sid = substr($sid, 0, 8);
+        if (strlen($sid) > 16)
+            $sid = substr($sid, 8);
+        $sid = substr($sid, 0, 8);
     } else
-	$sid = "1";
+        $sid = "1";
     return urlencode($sid);
 }
 

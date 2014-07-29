@@ -637,4 +637,12 @@ function updateSchema($Conf) {
         && $Conf->ql("update PaperReviewPreference set expertise=-expertise")
         && $Conf->ql("update Settings set value=77 where name='allowPaperOption'"))
         $Conf->settings["allowPaperOption"] = 77;
+    if ($Conf->settings["allowPaperOption"] == 77
+        && $Conf->ql("alter table MailLog add `q` varchar(4096)")
+        && $Conf->ql("update Settings set value=78 where name='allowPaperOption'"))
+        $Conf->settings["allowPaperOption"] = 78;
+    if ($Conf->settings["allowPaperOption"] == 78
+        && $Conf->ql("alter table MailLog add `t` varchar(200)")
+        && $Conf->ql("update Settings set value=79 where name='allowPaperOption'"))
+        $Conf->settings["allowPaperOption"] = 79;
 }

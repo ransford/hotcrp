@@ -68,18 +68,16 @@ function saveComment($text, $is_response) {
                  "tags" => @$_REQUEST["commenttags"],
                  "blind" => @$_REQUEST["blind"]);
     $next_crow = CommentSave::save($req, $prow, $crow, $Me, $is_response);
+    $what = ($is_response ? "Response" : "Comment");
+
     if ($next_crow === false) {
         if ($is_response) {
             $q = ($Conf->sversion >= 53 ? "(commentType&" . COMMENTTYPE_RESPONSE . ")!=0" : "forAuthors>1");
             $result = $Conf->qe("select commentId from PaperComment where paperId=$prow->paperId and $q");
-            if (($row = edb_row($result)))
-                return $Conf->errorMsg("A response has already been entered.  <a href=\"" . hoturl("paper", "p=$prow->paperId&amp;c=$row[0]#comment$row[0]") . "\">Edit that response</a>");
+            if (($next_crow = edb_orow($result)))
+                $Conf->errorMsg("Edit this response, which has already been entered.");
         }
-        return false;
-    }
-
-    $what = ($is_response ? "Response" : "Comment");
-    if ($next_crow && $is_response && ($next_crow->commentType & COMMENTTYPE_DRAFT)) {
+    } else if ($next_crow && $is_response && ($next_crow->commentType & COMMENTTYPE_DRAFT)) {
         $deadline = $Conf->printableTimeSetting("resp_done");
         if ($deadline != "N/A")
             $extratext = "  You have until $deadline to submit the response.";
@@ -93,14 +91,12 @@ function saveComment($text, $is_response) {
     else
         $Conf->confirmMsg("$what deleted.");
 
-    if ($next_crow)
-        redirectSelf(array("anchor" => "comment$next_crow->commentId",
-                           "noedit" => null, "c" => null));
-    else
-        redirectSelf(array("c" => null));
-    // NB normally redirectSelf() does not return
-    loadRows();
-    return true;
+    $x = array("p" => $prow->paperId, "c" => null, "noedit" => null, "ls" => @$_REQUEST["ls"]);
+    if ($next_crow) {
+        $x["anchor"] = "comment$next_crow->commentId";
+        go(hoturl("paper", $x));
+    } else
+        go(hoturl("paper", $x));
 }
 
 if (!check_post())
@@ -108,19 +104,21 @@ if (!check_post())
 else if ((isset($_REQUEST["submitcomment"]) || isset($_REQUEST["submitresponse"])
           || isset($_REQUEST["savedraftresponse"]))
          && defval($_REQUEST, "response")) {
+    $text = @rtrim($_REQUEST["comment"]);
     if (!$Me->canRespond($prow, $crow, $whyNot, true)) {
         $Conf->errorMsg(whyNotText($whyNot, "respond to reviews for"));
         $useRequest = true;
-    } else if (!($text = defval($_REQUEST, "comment")) && !$crow) {
+    } else if ($text === "" && !$crow) {
         $Conf->errorMsg("Enter a comment.");
         $useRequest = true;
     } else
         saveComment($text, true);
 } else if (isset($_REQUEST["submitcomment"])) {
+    $text = @rtrim($_REQUEST["comment"]);
     if (!$Me->canSubmitComment($prow, $crow, $whyNot)) {
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
         $useRequest = true;
-    } else if (!($text = defval($_REQUEST, "comment")) && !$crow) {
+    } else if ($text === "" && !$crow) {
         $Conf->errorMsg("Enter a comment.");
         $useRequest = true;
     } else
@@ -142,46 +140,6 @@ if (isset($_REQUEST["settags"]) && check_post()) {
 }
 
 
-// can we view/edit reviews?
-$viewAny = $Me->canViewReview($prow, null, null, $whyNotView);
-$editAny = $Me->canReview($prow, null, $whyNotEdit);
-
-
-// can we see any reviews?
-if (!$viewAny && !$editAny) {
-    if (!$Me->canViewPaper($prow, $whyNotPaper))
-        errorMsgExit(whyNotText($whyNotPaper, "view"));
-    if (!isset($_REQUEST["reviewId"]) && !isset($_REQUEST["ls"])) {
-        $Conf->errorMsg("You can’t see the reviews for this paper.  " . whyNotText($whyNotView, "review"));
-        go(hoturl("paper", "p=$prow->paperId"));
-    }
-}
-
-
-// mode
-if ($paperTable->mode == "r" || $paperTable->mode == "re")
-    $paperTable->fixReviewMode();
-if ($paperTable->mode == "pe")
-    go(hoturl("paper", array("p" => $prow->paperId, "ls" => @$_REQUEST["ls"])));
-
-
-// page header
-confHeader();
-
-
-// paper table
-$paperTable->initialize(false, false);
-$paperTable->paptabBegin();
-
-if (!$viewAny && !$editAny
-    && (!$paperTable->rrow
-        || !$Me->canViewReview($prow, $paperTable->rrow, null)))
-    $paperTable->paptabEndWithReviewMessage();
-else if ($paperTable->mode == "r" && !$paperTable->rrow)
-    $paperTable->paptabEndWithReviews();
-else
-    $paperTable->paptabEndWithEditableReview();
-
-$paperTable->paptabComments();
-
-$Conf->footer();
+go(hoturl("paper", array("p" => $prow->paperId,
+                         "c" => @$_REQUEST["c"],
+                         "ls" => @$_REQUEST["ls"])));

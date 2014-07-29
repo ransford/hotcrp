@@ -338,7 +338,8 @@ class PaperList extends BaseList {
         }
         if ($this->contact->privChair)
             $sel_opt["authors"] = "Authors &amp; contacts";
-        else if ($this->contact->has_review() && !$Conf->subBlindAlways())
+        else if ($this->contact->has_review()
+                 && $Conf->submission_blindness() != Conference::BLIND_ALWAYS)
             $sel_opt["authors"] = "Authors";
         $sel_opt["topics"] = "Topics";
         if ($this->contact->privChair) {
@@ -467,7 +468,7 @@ class PaperList extends BaseList {
             $t .= $barsep
                 . "<td class='lll$nlll'><a href=\"" . selfHref(array("atab" => "mail")) . "#plact\" onclick='return crpfocus(\"plact\",$nlll)'>Mail</a></td><td class='lld$nlll'><b>:</b> &nbsp;"
                 . Ht::select("recipients", array("au" => "Contact authors", "rev" => "Reviewers"), defval($_REQUEST, "recipients"), array("id" => "plact${nlll}_d"))
-                . " &nbsp;" . Ht::submit("sendmail", "Go") . "</td>";
+                . " &nbsp;" . Ht::submit("sendmail", "Go", array("onclick" => "return (papersel_check_safe=true)")) . "</td>";
             $nlll++;
         }
 
@@ -847,7 +848,7 @@ class PaperList extends BaseList {
             $titleextra .= "<span class='sep'></span><a class='fn3' href=\"javascript:void fold('pl',0,3)\">Show all papers</a>";
         if (($this->any->openau || $this->any->anonau) && $show_links) {
             $titleextra .= "<span class='sep'></span>";
-            if ($Conf->subBlindNever())
+            if ($Conf->submission_blindness() == Conference::BLIND_NEVER)
                 $titleextra .= "<a class='fn1' href=\"javascript:void fold('pl',0,'au')\">Show authors</a><a class='fx1' href=\"javascript:void fold('pl',1,'au')\">Hide authors</a>";
             else if ($this->contact->privChair && $this->any->anonau && !$this->any->openau)
                 $titleextra .= "<a class='fn1 fn2' href=\"javascript:fold('pl',0,'au');void fold('pl',0,'anonau')\">Show authors</a><a class='fx1 fx2' href=\"javascript:fold('pl',1,'au');void fold('pl',1,'anonau')\">Hide authors</a>";
@@ -1143,7 +1144,7 @@ class PaperList extends BaseList {
             if ($this->sortable && $url) {
                 global $ConfSiteBase;
                 $sortUrl = htmlspecialchars($ConfSiteBase . $url) . (strpos($url, "?") ? "&amp;" : "?") . "sort=";
-                $q = "<a class='pl_sort' title='Change sort' href=\"" . $sortUrl;
+                $q = '<a class="pl_sort" rel="nofollow" title="Change sort" href="' . $sortUrl;
             } else
                 $sortUrl = false;
 
@@ -1175,7 +1176,7 @@ class PaperList extends BaseList {
                           || $fdef->name == "edit" . $this->sorters[0]->type)
                          && $sortUrl)
                         || $defsortname == $this->sorters[0]->type))
-                    $colhead .= "<a class='pl_sort_def" . ($this->sorters[0]->reverse ? "_rev" : "") . "' title='Reverse sort' href=\"" . $sortUrl . urlencode($this->sorters[0]->type . "," . ($this->sorters[0]->reverse ? "n" : "r")) . "\">" . $ftext . "</a>";
+                    $colhead .= '<a class="pl_sort_def' . ($this->sorters[0]->reverse ? "_rev" : "") . '" rel="nofollow" title="Reverse sort" href="' . $sortUrl . urlencode($this->sorters[0]->type . "," . ($this->sorters[0]->reverse ? "n" : "r")) . '">' . $ftext . "</a>";
                 else if ($fdef->sorter && $sortUrl)
                     $colhead .= $q . urlencode($fdef->name) . "\">" . $ftext . "</a>";
                 else if ($defsortname)
