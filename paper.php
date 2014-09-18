@@ -8,6 +8,9 @@ require_once("src/initweb.php");
 require_once("src/papertable.php");
 if ($Me->is_empty())
     $Me->escape();
+if (@$_REQUEST["update"] && check_post() && !$Me->has_database_account()
+    && $Me->canStartPaper())
+    $Me = $Me->activate_database_account();
 $useRequest = isset($_REQUEST["after_login"]);
 foreach (array("emailNote", "reason") as $x)
     if (isset($_REQUEST[$x]) && $_REQUEST[$x] == "Optional explanation")
@@ -19,6 +22,9 @@ else if (defval($_REQUEST, "mode") == "view")
 if (!isset($_REQUEST["p"]) && !isset($_REQUEST["paperId"])
     && preg_match(',\A/(?:new|\d+)\z,i', Navigation::path()))
     $_REQUEST["p"] = substr(Navigation::path(), 1);
+else if (!Navigation::path() && @$_REQUEST["p"] && ctype_digit($_REQUEST["p"])
+         && !@$Opt["disableSlashURLs"] && !check_post())
+    go(selfHref());
 
 
 // header
@@ -71,12 +77,6 @@ if (!$newPaper) {
 
 
 // paper actions
-if (isset($_REQUEST["clickthrough"]) && check_post()) {
-    if (@$_REQUEST["clickthrough_accept"])
-        $Me->save_data("clickthrough_" . $_REQUEST["clickthrough"], $Now);
-    else if (@$_REQUEST["clickthrough_decline"])
-        $Conf->errorMsg("You can’t edit a paper until you accept the current submission terms.");
-}
 if (isset($_REQUEST["setrevpref"]) && $prow && check_post()) {
     PaperActions::setReviewPreference($prow);
     loadRows();
@@ -99,7 +99,9 @@ if (isset($_REQUEST["setfollow"]) && $prow && check_post()) {
 if (isset($_REQUEST["checkformat"]) && $prow && $Conf->setting("sub_banal")) {
     $ajax = defval($_REQUEST, "ajax", 0);
     $cf = new CheckFormat();
-    $dt = requestDocumentType($_REQUEST);
+    $dt = HotCRPDocument::parse_dtype(@$_REQUEST["dt"]);
+    if ($dt === null)
+        $dt = @$_REQUEST["final"] ? DTYPE_FINAL : DTYPE_SUBMISSION;
     if ($Conf->setting("sub_banal$dt"))
         $format = $Conf->setting_data("sub_banal$dt", "");
     else
@@ -131,20 +133,20 @@ if (isset($_REQUEST["withdraw"]) && !$newPaper && check_post()) {
         if ($Conf->sversion >= 44 && $reason != "")
             $q .= ", withdrawReason='" . sqlq($reason) . "'";
         $Conf->qe($q . " where paperId=$paperId");
-        $result = $Conf->qe("update PaperReview set reviewNeedsSubmit=0 where paperId=$paperId");
-        $numreviews = edb_nrows_affected($result);
+        $result = Dbl::qe("update PaperReview set reviewNeedsSubmit=0 where paperId=$paperId");
+        $numreviews = $result ? $result->affected_rows : false;
         $Conf->updatePapersubSetting(false);
         loadRows();
 
         // email contact authors themselves
         if (!$Me->privChair || defval($_REQUEST, "doemail") > 0)
-            Mailer::sendContactAuthors(($prow->conflictType >= CONFLICT_AUTHOR ? "@authorwithdraw" : "@adminwithdraw"),
-                                       $prow, null, array("reason" => $reason, "infoNames" => 1));
+            Mailer::send_contacts(($prow->conflictType >= CONFLICT_AUTHOR ? "@authorwithdraw" : "@adminwithdraw"),
+                                       $prow, array("reason" => $reason, "infoNames" => 1));
 
         // email reviewers
-        if (($numreviews > 0 && $Conf->timeReviewOpen())
+        if (($numreviews > 0 && $Conf->time_review_open())
             || $prow->startedReviewCount > 0)
-            Mailer::sendReviewers("@withdrawreviewer", $prow, null, array("reason" => $reason));
+            Mailer::send_reviewers("@withdrawreviewer", $prow, array("reason" => $reason));
 
         // remove voting tags so people don't have phantom votes
         $tagger = new Tagger;
@@ -289,7 +291,7 @@ function request_differences($prow, $isfinal) {
     // topics
     $result = $Conf->q("select TopicArea.topicId, PaperTopic.paperId from TopicArea left join PaperTopic on PaperTopic.paperId=$prow->paperId and PaperTopic.topicId=TopicArea.topicId");
     while (($row = edb_row($result)))
-        if (($row[1] > 0) != (rcvtint($_REQUEST["top$row[0]"]) > 0))
+        if (($row[1] > 0) != (cvtint(@$_REQUEST["top$row[0]"]) > 0))
             $diffs["topics"] = true;
 
     // options
@@ -604,11 +606,11 @@ function update_paper($Me, $isSubmit, $isSubmitFinal, $diffs) {
     if (!$newPaper)
         $Conf->qe("update Paper set " . join(", ", $q) . " where paperId=$paperId and timeWithdrawn<=0");
     else {
-        if (!($result = $Conf->qe("insert into Paper set " . join(", ", $q)))) {
+        if (!($result = Dbl::real_qe("insert into Paper set " . join(", ", $q)))) {
             $Conf->errorMsg("Could not create paper.");
             return false;
         }
-        if (!($result = $Conf->lastInsertId()))
+        if (!($result = $result->insert_id))
             return false;
         $paperId = $_REQUEST["p"] = $_REQUEST["paperId"] = $result;
     }
@@ -681,7 +683,7 @@ function update_paper($Me, $isSubmit, $isSubmitFinal, $diffs) {
         $Conf->qe("update Paper set timeSubmitted=0 where paperId=$paperId");
         loadRows();
     }
-    if ($isSubmit || $Conf->setting("pc_seeall"))
+    if ($isSubmit || $Conf->can_pc_see_all_submissions())
         $Conf->updatePapersubSetting(true);
     if ($wasSubmitted != ($prow->$submitkey > 0))
         $diffs["submission"] = 1;
@@ -756,7 +758,7 @@ function update_paper($Me, $isSubmit, $isSubmitFinal, $diffs) {
             $options["reason"] = $_REQUEST["emailNote"];
         if ($notes !== "")
             $options["notes"] = preg_replace(",</?(?:span.*?|strong)>,", "", $notes) . "\n\n";
-        Mailer::sendContactAuthors($template, $prow, null, $options);
+        Mailer::send_contacts($template, $prow, $options);
     }
 
     // other mail confirmations
@@ -828,7 +830,7 @@ if (isset($_REQUEST["delete"]) && check_post()) {
     else {
         // mail first, before contact info goes away
         if (!$Me->privChair || defval($_REQUEST, "doemail") > 0)
-            Mailer::sendContactAuthors("@deletepaper", $prow, null, array("reason" => defval($_REQUEST, "emailNote", ""), "infoNames" => 1));
+            Mailer::send_contacts("@deletepaper", $prow, array("reason" => defval($_REQUEST, "emailNote", ""), "infoNames" => 1));
         // XXX email self?
 
         $error = false;

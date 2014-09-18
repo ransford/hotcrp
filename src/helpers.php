@@ -27,80 +27,10 @@ function set_error_html($x, $error_html = null) {
 }
 
 
-// database helpers
-
-// number of rows returned by a select query, or 'false' if result is an error
-function edb_nrows($result) {
-    return ($result ? $result->num_rows : false);
-}
-
-// number of rows affected by an update/insert query, or 'false' if result is
-// an error
-function edb_nrows_affected($result) {
-    global $Conf;
-    return ($result ? $Conf->dblink->affected_rows : false);
-}
-
-// next row as an array, or 'false' if no more rows or result is an error
-function edb_row($result) {
-    return ($result ? $result->fetch_row() : false);
-}
-
-// array of all rows as arrays
-function edb_rows($result) {
-    $x = array();
-    while ($result && ($row = $result->fetch_row()))
-        $x[] = $row;
-    return $x;
-}
-
-// next row as an object, or 'false' if no more rows or result is an error
-function edb_orow($result) {
-    return ($result ? $result->fetch_object() : false);
-}
-
-// array of all rows as objects
-function edb_orows($result) {
-    $x = array();
-    while ($result && ($row = $result->fetch_object()))
-        $x[] = $row;
-    return $x;
-}
-
-// quoting for SQL
-function sqlq($value) {
-    global $Conf;
-    return $Conf->dblink->escape_string($value);
-}
-
-function sqlq_for_like($value) {
-    return preg_replace("/(?=[%_\\\\'\"\\x00\\n\\r\\x1a])/", "\\", $value);
-}
-
-function sqlqtrim($value) {
-    global $Conf;
-    return $Conf->dblink->escape_string(trim($value));
-}
-
-function sql_in_numeric_set($set) {
-    if (count($set) == 0)
-        return "=-1";
-    else if (count($set) == 1)
-        return "=" . $set[0];
-    else
-        return " in (" . join(",", $set) . ")";
-}
-
-function sql_not_in_numeric_set($set) {
-    $sql = sql_in_numeric_set($set);
-    return ($sql[0] == "=" ? "!" : " not") . $sql;
-}
-
-
 // string helpers
 
 function cvtint($value, $default = -1) {
-    $v = trim($value);
+    $v = trim((string) $value);
     if (is_numeric($v)) {
         $ival = intval($v);
         if ($ival == floatval($v))
@@ -110,14 +40,10 @@ function cvtint($value, $default = -1) {
 }
 
 function cvtnum($value, $default = -1) {
-    $v = trim($value);
+    $v = trim((string) $value);
     if (is_numeric($v))
         return floatval($v);
     return $default;
-}
-
-function rcvtint(&$value, $default = -1) {
-    return (isset($value) ? cvtint($value, $default) : $default);
 }
 
 function mkarray($value) {
@@ -208,13 +134,18 @@ if (function_exists("iconv")) {
 global $_hoturl_defaults;
 $_hoturl_defaults = null;
 
-function hoturl_defaults($options) {
+function hoturl_defaults($options = array()) {
     global $_hoturl_defaults;
     foreach ($options as $k => $v)
         if ($v !== null)
-            $_hoturl_defaults[$k] = $v;
+            $_hoturl_defaults[$k] = urlencode($v);
         else
             unset($_hoturl_defaults[$k]);
+    $ret = array();
+    if ($_hoturl_defaults)
+        foreach ($_hoturl_defaults as $k => $v)
+            $ret[$k] = urldecode($v);
+    return $ret;
 }
 
 function hoturl_site_relative($page, $options = null) {
@@ -314,6 +245,19 @@ function hoturl_absolute($page, $options = null) {
     return $Opt["paperSite"] . "/" . hoturl_site_relative($page, $options);
 }
 
+function hoturl_absolute_nodefaults($page, $options = null) {
+    global $Opt, $_hoturl_defaults;
+    $defaults = $_hoturl_defaults;
+    $_hoturl_defaults = null;
+    $url = hoturl_absolute($page, $options);
+    $_hoturl_defaults = $defaults;
+    return $url;
+}
+
+function hoturl_site_relative_raw($page, $options = null) {
+    return htmlspecialchars_decode(hoturl_site_relative($page, $options));
+}
+
 function hoturl_raw($page, $options = null) {
     return htmlspecialchars_decode(hoturl($page, $options));
 }
@@ -371,7 +315,8 @@ function selfHref($extra = array(), $options = null) {
         $uri = hoturl_site_relative(Navigation::page(), $param);
     if (isset($extra["anchor"]))
         $uri .= "#" . $extra["anchor"];
-    if (!$options || !@$options["raw"])
+    $uri = str_replace("&amp;", "&", $uri);
+    if (!$options || @$options["raw"])
         return $uri;
     else
         return htmlspecialchars($uri);
@@ -488,28 +433,6 @@ function paperDownload($prow, $final = false) {
     return $doc ? documentDownload($doc) : "";
 }
 
-function requestDocumentType($req, $default = DTYPE_SUBMISSION) {
-    if (is_string($req))
-        $req = array("dt" => $req);
-    if (($dt = defval($req, "dt"))) {
-        if (preg_match('/\A-?\d+\z/', $dt))
-            return (int) $dt;
-        $dt = strtolower($dt);
-        if ($dt == "paper" || $dt == "submission")
-            return DTYPE_SUBMISSION;
-        if ($dt == "final")
-            return DTYPE_FINAL;
-        if (substr($dt, 0, 4) == "opt-")
-            $dt = substr($dt, 4);
-        foreach (PaperOption::option_list() as $o)
-            if ($dt == $o->abbr)
-                return $o->id;
-    }
-    if (defval($req, "final", 0) != 0)
-        return DTYPE_FINAL;
-    return $default;
-}
-
 function topicTable($prow, $active = 0) {
     global $Conf;
     $paperId = ($prow ? $prow->paperId : -1);
@@ -581,16 +504,6 @@ function authorTable($aus, $viewAs = null) {
     return $out;
 }
 
-function highlightMatch($match, $text, &$n = null) {
-    if ($match == "") {
-        $n = 0;
-        return $text;
-    }
-    if ($match[0] != "{")
-        $match = "{(" . $match . ")}i";
-    return preg_replace($match, "<span class='match'>\$1</span>", $text, -1, $n);
-}
-
 function decorateNumber($n) {
     if ($n < 0)
         return "&#8722;" . (-$n);
@@ -648,7 +561,7 @@ function _tryNewList($opt, $listtype, $sort = null) {
         $q = "select email from ContactInfo";
         if ($searchtype == "pc")
             $q .= " join PCMember using (contactId)";
-        $result = $Conf->qx("$q order by lastName, firstName, email");
+        $result = $Conf->ql("$q order by lastName, firstName, email");
         $a = array();
         while (($row = edb_row($result)))
             $a[] = $row[0];
@@ -669,7 +582,7 @@ function _tryNewList($opt, $listtype, $sort = null) {
 function _one_quicklink($id, $baseUrl, $urlrest, $listtype, $isprev) {
     global $Conf;
     if ($listtype == "u") {
-        $result = $Conf->qx("select email from ContactInfo where email='" . sqlq($id) . "'");
+        $result = $Conf->ql("select email from ContactInfo where email='" . sqlq($id) . "'");
         $row = edb_row($result);
         $paperText = htmlspecialchars($row ? $row[0] : $id);
         $urlrest = "u=" . urlencode($id) . $urlrest;
@@ -692,7 +605,7 @@ function quicklinks($id, $baseUrl, $args, $listtype) {
     $list = false;
     $CurrentList = 0;
     if (isset($_REQUEST["ls"])
-        && ($listno = rcvtint($_REQUEST["ls"])) > 0
+        && ($listno = cvtint(@$_REQUEST["ls"])) > 0
         && ($xlist = SessionList::lookup($listno))
         && str_starts_with($xlist->listid, $listtype)
         && (!@$xlist->cid || $xlist->cid == ($Me ? $Me->contactId : 0))) {
@@ -762,13 +675,11 @@ function goPaperForm($baseUrl = null, $args = array()) {
     global $Conf, $Me, $CurrentList;
     if ($Me->is_empty())
         return "";
-    if ($baseUrl === null)
-        $baseUrl = ($Me->isPC && $Conf->setting("rev_open") ? "review" : "paper");
-    $x = "<form class='gopaper' action='" . hoturl($baseUrl) . "' method='get' accept-charset='UTF-8'><div class='inform'>";
+    $x = Ht::form_div(hoturl($baseUrl ? : "paper"), array("method" => "get", "class" => "gopaper"));
     if ($baseUrl == "profile")
-        $x .= Ht::entry("u", "(User)", array("id" => "quicksearchq", "class" => "textlite", "size" => 10, "hottemptext" => "(User)"));
+        $x .= Ht::entry("u", "(User)", array("id" => "quicksearchq", "size" => 10, "hottemptext" => "(User)"));
     else
-        $x .= Ht::entry("p", "(All)", array("id" => "quicksearchq", "class" => "textlite", "size" => 10, "hottemptext" => "(All)"));
+        $x .= Ht::entry("p", "(All)", array("id" => "quicksearchq", "size" => 10, "hottemptext" => "(All)"));
     foreach ($args as $what => $val)
         $x .= Ht::hidden($what, $val);
     if (isset($CurrentList) && $CurrentList > 0)
@@ -856,10 +767,8 @@ function genericWatch($prow, $watchtype, $callback, $contact) {
                 PaperReview.reviewType myReviewType,
                 PaperReview.reviewSubmitted myReviewSubmitted,
                 PaperReview.reviewNeedsSubmit myReviewNeedsSubmit,
-                conflictType, watch, preferredEmail";
-    if ($Conf->sversion >= 47)
-        $q .= ", disabled";
-    $q .= "\nfrom ContactInfo
+                conflictType, watch, preferredEmail, disabled
+        from ContactInfo
         left join PaperConflict on (PaperConflict.paperId=$prow->paperId and PaperConflict.contactId=ContactInfo.contactId)
         left join PaperWatch on (PaperWatch.paperId=$prow->paperId and PaperWatch.contactId=ContactInfo.contactId)
         left join PaperReview on (PaperReview.paperId=$prow->paperId and PaperReview.contactId=ContactInfo.contactId)
@@ -1014,25 +923,6 @@ function link_urls($html) {
                         '<a href="$1" rel="noreferrer">$1</a>$2', $html);
 }
 
-function htmlFold($text, $maxWords) {
-    global $foldId;
-
-    if (strlen($text) < $maxWords * 7)
-        return $text;
-    $words = preg_split('/\\s+/', $text);
-    if (count($words) < $maxWords)
-        return $text;
-
-    $x = join(" ", array_slice($words, 0, $maxWords));
-
-    $fid = (isset($foldId) ? $foldId : 1);
-    $foldId = $fid + 1;
-
-    $x .= "<span id='fold$fid' class='foldc'><span class='fn'> ... </span><a class='fn' href='javascript:void fold($fid, 0)'>[More]</a><span class='fx'> " . join(" ", array_slice($words, $maxWords)) . " </span><a class='fx' href='javascript:void fold($fid, 1)'>[Less]</a></span>";
-
-    return $x;
-}
-
 function ini_get_bytes($varname) {
     // from PHP manual
     $val = trim(ini_get($varname));
@@ -1147,6 +1037,8 @@ function whyNotText($whyNot, $action) {
         $text .= "You didn’t write this review, so you can’t change it. ";
     if (isset($whyNot['reviewToken']))
         $text .= "If you know a valid review token, enter it above to edit that review. ";
+    if (@$whyNot["clickthrough"])
+        $text .= "You can’t do that until you agree to the current terms. ";
     // finish it off
     if (isset($whyNot['chairMode']))
         $text .= "(<a class='nowrap' href=\"" . selfHref(array("forceShow" => 1)) . "\">" . ucfirst($action) . " the paper anyway</a>) ";
@@ -1164,30 +1056,26 @@ function actionTab($text, $url, $default) {
         return "    <td><div class='vbtab'><a href='$url'>$text</a></div></td>\n";
 }
 
-function actionBar($mode = "", $prow = null) {
+function actionBar($mode = null, $prow = null) {
     global $Me, $Conf, $CurrentList;
     $forceShow = ($Me->is_admin_force() ? "&amp;forceShow=1" : "");
 
-    $goBase = "paper";
     $paperArg = "p=*";
     $xmode = array();
     $listtype = "p";
 
+    $goBase = "paper";
     if ($mode == "assign")
         $goBase = "assign";
-    else if ($mode == "r" || $mode == "re" || $mode == "review")
+    else if ($mode == "re")
         $goBase = "review";
-    else if ($mode == "c" || $mode == "comment")
-        $goBase = "comment";
     else if ($mode == "account") {
         $listtype = "u";
         if ($Me->privChair)
             $goBase = "profile";
         else
             $prow = null;
-    } else if ($mode == "" && $Me->isPC && $Conf->setting("rev_open"))
-        $goBase = "review";
-    else if (($wantmode = defval($_REQUEST, "m", defval($_REQUEST, "mode"))))
+    } else if (($wantmode = defval($_REQUEST, "m", defval($_REQUEST, "mode"))))
         $xmode["m"] = $wantmode;
 
     $listarg = $forceShow;
@@ -1272,7 +1160,8 @@ function downloadText($text, $filename, $inline = false) {
 }
 
 function parse_preference($n) {
-    if (preg_match(',\A\s*(-+|\++|[-+]?\d+(?:\.\d*)?|)\s*([xyz]|)\s*\z,i', $n, $m)) {
+    $n = trim($n);
+    if (preg_match(',\A(-+|\++|[-+]?\d+(?:\.\d*)?|)\s*([xyz]|)\z,i', $n, $m)) {
         if ($m[1] === "")
             $p = 0;
         else if (is_numeric($m[1])) {
@@ -1292,6 +1181,10 @@ function parse_preference($n) {
     } else if (strpos($n, "\xE2") !== false)
         // Translate UTF-8 for minus sign into a real minus sign ;)
         return parse_preference(str_replace("\xE2\x88\x92", '-', $n));
+    else if (strcasecmp($n, "none") == 0 || strcasecmp($n, "n/a") == 0)
+        return array(0, null);
+    else if (strcasecmp($n, "conflict") == 0)
+        return array(-100, null);
     else
         return null;
 }
@@ -1314,23 +1207,19 @@ function unparse_preference($preference, $expertise = null) {
     return $preference . unparse_expertise($expertise);
 }
 
-function unparse_preference_span($preference, $topicInterestScore = 0) {
+function unparse_preference_span($preference) {
     if (is_object($preference))
         $preference = array(@$preference->reviewerPreference,
-                            @$preference->reviewerExpertise);
-    if (@$preference[2] !== null)
-        $topicInterestScore = $preference[2];
-    if ($preference[0] != 0)
-        $type = ($preference[0] > 0 ? 1 : -1);
-    else
-        $type = ($topicInterestScore > 0 ? 1 : -1);
+                            @$preference->reviewerExpertise,
+                            @$preference->topicInterestScore);
+    $type = 1;
+    if ($preference[0] < 0 || (!$preference[0] && @($preference[2] < 0)))
+        $type = -1;
     $t = "";
-    if ($preference[0] || $preference[1])
+    if ($preference[0] || $preference[1] !== null)
         $t .= "P" . decorateNumber($preference[0]) . unparse_expertise($preference[1]);
-    if ($t !== "" && $topicInterestScore)
-        $t .= " ";
-    if ($topicInterestScore)
-        $t .= "T" . decorateNumber($topicInterestScore);
+    if (@$preference[2])
+        $t .= ($t ? " " : "") . "T" . decorateNumber($preference[2]);
     if ($t !== "")
         $t = " <span class='asspref$type'>$t</span>";
     return $t;
@@ -1359,8 +1248,7 @@ function pcMembers() {
         || $PcMembersCache[0] < $Conf->setting("pc")
         || $PcMembersCache[2] != @$Opt["sortByLastName"]) {
         $pc = array();
-        $qa = ($Conf->sversion >= 35 ? ", contactTags" : "") . ($Conf->sversion >= 47 ? ", disabled" : "");
-        $result = $Conf->q("select firstName, lastName, affiliation, email, ContactInfo.contactId contactId, roles$qa from ContactInfo join PCMember using (contactId)");
+        $result = $Conf->q("select firstName, lastName, affiliation, email, ContactInfo.contactId contactId, roles, contactTags, disabled from ContactInfo join PCMember using (contactId)");
         $by_name_text = array();
         while (($row = edb_orow($result))) {
             $row = Contact::make($row);

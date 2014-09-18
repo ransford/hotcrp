@@ -5,7 +5,7 @@
 
 require_once("src/initweb.php");
 require_once("src/papersearch.php");
-if ($Me->is_empty() || !$Me->privChair)
+if (!$Me->privChair)
     $Me->escape();
 
 // paper selection
@@ -62,7 +62,7 @@ $Conf->header("Review Assignments", "assignpc", $abar);
 
 
 $pcm = pcMembers();
-$reviewer = rcvtint($_REQUEST["reviewer"]);
+$reviewer = cvtint(@$_REQUEST["reviewer"]);
 if ($reviewer <= 0)
     $reviewer = $Me->contactId;
 if ($reviewer <= 0 || !@$pcm[$reviewer])
@@ -70,9 +70,9 @@ if ($reviewer <= 0 || !@$pcm[$reviewer])
 
 
 function saveAssignments($reviewer) {
-    global $Conf, $Me, $kind;
+    global $Conf, $Me, $Now, $kind;
 
-    $result = $Conf->qe("lock tables Paper read, PaperReview write, PaperReviewRefused write, PaperConflict write" . $Conf->tagRoundLocker($kind == "a"));
+    $result = $Conf->qe("lock tables Paper read, PaperReview write, PaperReviewRefused write, PaperConflict write, Settings write");
     if (!$result)
         return $result;
 
@@ -86,7 +86,6 @@ function saveAssignments($reviewer) {
 
     $lastPaperId = -1;
     $del = $ins = "";
-    $when = time();
     while (($row = edb_orow($result))) {
         if ($row->paperId == $lastPaperId
             || $row->conflictType >= CONFLICT_AUTHOR
@@ -99,7 +98,7 @@ function saveAssignments($reviewer) {
         if ($type < 0 && $row->conflictType < CONFLICT_CHAIRMARK)
             $ins .= ", ($row->paperId, $reviewer, " . CONFLICT_CHAIRMARK . ")";
         if ($kind == "a")
-            $Me->assign_paper($row->paperId, $row, $reviewer, $type, $when);
+            $Me->assign_paper($row->paperId, $row, $reviewer, $type);
     }
 
     if ($ins)
@@ -110,7 +109,7 @@ function saveAssignments($reviewer) {
     $Conf->qe("unlock tables");
     $Conf->updateRevTokensSetting(false);
 
-    if ($Conf->sversion >= 46 && $Conf->setting("pcrev_assigntime") == $when)
+    if ($Conf->setting("pcrev_assigntime") == $Now)
         $Conf->confirmMsg("Assignments saved! You may want to <a href=\"" . hoturl("mail", "template=newpcrev") . "\">send mail about the new assignments</a>.");
 }
 
@@ -151,7 +150,8 @@ else
 
 
 // Change PC member
-echo "<table><tr><td><div class='aahc assignpc_pcsel'><form method='get' action='", hoturl("manualassign"), "' accept-charset='UTF-8' id='selectreviewerform'><div class='inform'>\n";
+echo "<table><tr><td><div class='aahc assignpc_pcsel'>",
+    Ht::form_div(hoturl("manualassign"), array("method" => "get", "id" => "selectreviewerform"));
 
 $result = $Conf->qe("select PCMember.contactId, count(reviewId) as reviewCount
                 from PCMember
@@ -165,8 +165,8 @@ $rev_opt = array();
 if ($reviewer <= 0)
     $rev_opt[0] = "(Select a PC member)";
 foreach ($pcm as $pc)
-    $rev_opt[$pc->cid] = Text::name_html($pc) . " ("
-        . plural(defval($rev_count, $pc->cid, 0), "assignment") . ")";
+    $rev_opt[$pc->contactId] = Text::name_html($pc) . " ("
+        . plural(defval($rev_count, $pc->contactId, 0), "assignment") . ")";
 
 echo "<table><tr><td><strong>PC member:</strong> &nbsp;</td>",
     "<td>", Ht::select("reviewer", $rev_opt, $reviewer, array("onchange" => "hiliter(this)")), "</td></tr>",
@@ -185,7 +185,7 @@ if (!isset($_REQUEST["t"]) || !isset($tOpt[$_REQUEST["t"]]))
     $_REQUEST["t"] = "s";
 $q = (defval($_REQUEST, "q", "") == "" ? "(All)" : $_REQUEST["q"]);
 echo "<tr><td>Paper selection: &nbsp;</td>",
-    "<td><input id='manualassignq' class='textlite temptextoff' type='text' size='40' name='q' value=\"", htmlspecialchars($q), "\" onchange='hiliter(this)' title='Enter paper numbers or search terms' /> &nbsp;in &nbsp;",
+    "<td><input id='manualassignq' class='temptextoff' type='text' size='40' name='q' value=\"", htmlspecialchars($q), "\" onchange='hiliter(this)' title='Enter paper numbers or search terms' /> &nbsp;in &nbsp;",
     Ht::select("t", $tOpt, $_REQUEST["t"], array("onchange" => "hiliter(this)")),
     "</td></tr>\n",
     "<tr><td colspan='2'><div class='g'></div>\n";
@@ -198,16 +198,13 @@ echo Ht::radio("kind", "a", $kind == "a",
                array("onchange" => "hiliter(this)")),
     "&nbsp;", Ht::label("Assign conflicts only (and limit papers to potential conflicts)"), "</td></tr>\n";
 
-if ($kind == "a") {
-    echo "<tr><td colspan='2'><div class='g'></div></td></tr>\n",
-        "<tr><td>",
-        (isset($Error["rev_roundtag"]) ? "<span class='error'>" : ""),
-        "Review round: &nbsp;</td>",
-        "<td><input id='assrevroundtag' class='textlite temptextoff' type='text' size='15' name='rev_roundtag' value=\"", htmlspecialchars($rev_roundtag ? $rev_roundtag : "(None)"), "\" />",
-        (isset($Error["rev_roundtag"]) ? "</span>" : ""),
-        " &nbsp;<a class='hint' href='", hoturl("help", "t=revround"), "'>What is this?</a>\n",
+$rev_roundtag = $Conf->setting_data("rev_roundtag");
+if ($kind == "a" && (count($Conf->round_list()) > 1 || $rev_roundtag)) {
+    echo "<tr><td colspan='2'><div class='g'></div>",
+        Ht::hidden("rev_roundtag", $rev_roundtag),
+        'Current review round: &nbsp;', htmlspecialchars($rev_roundtag ? : "(no name)"),
+        ' &nbsp;<span class="barsep">|</span>&nbsp; <a href="', hoturl("settings", "group=reviews"), '">Configure rounds</a>',
         "</td></tr>";
-    $Conf->footerScript("mktemptext('assrevroundtag','(None)')");
 }
 
 echo "<tr><td colspan='2'><div class='aax' style='text-align:right'>",
@@ -304,7 +301,7 @@ if ($reviewer > 0) {
     }
 
     // ajax assignment form
-    echo "<form id='assrevform' method='post' action=\"", hoturl_post("assign", "update=1"), "\" enctype='multipart/form-data' accept-charset='UTF-8'><div class='clear'>",
+    echo Ht::form(hoturl_post("assign", "update=1"), array("id" => "assrevform")), "<div class='clear'>",
         Ht::hidden("kind", $kind),
         Ht::hidden("p", ""),
         Ht::hidden("pcs$reviewer", ""),
@@ -315,7 +312,7 @@ if ($reviewer > 0) {
     // main assignment form
     $search = new PaperSearch($Me, array("t" => $_REQUEST["t"],
                                          "q" => $_REQUEST["q"],
-                                         "urlbase" => hoturl_site_relative("manualassign", "reviewer=$reviewer")));
+                                         "urlbase" => hoturl_site_relative_raw("manualassign", "reviewer=$reviewer")));
     $paperList = new PaperList($search, array("sort" => true, "list" => true, "reviewer" => $reviewer));
     $paperList->display .= " topics ";
     if ($kind != "c")
@@ -350,5 +347,5 @@ if ($reviewer > 0) {
         "</div></div></form></div>\n";
 }
 
-echo "<div class='clear'></div>";
+echo '<hr class="c" />';
 $Conf->footer();

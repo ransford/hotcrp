@@ -337,7 +337,7 @@ class UserStatus {
         if (isset($cj->phone))
             $user->voicePhoneNumber = $cj->phone;
         if (!isset($cj->password) && isset($cj->password_plaintext))
-            $user->change_password($cj->password_plaintext);
+            $user->change_password($cj->password_plaintext, false);
         if (!$user->password && !Contact::external_login())
             $user->password = $user->password_plaintext = Contact::random_password();
         if (isset($cj->zip))
@@ -400,7 +400,7 @@ class UserStatus {
         if (($roles | $old_roles) & Contact::ROLE_PCLIKE)
             $Conf->invalidateCaches(array("pc" => 1));
 
-        if (!$old_user || !$old_user->is_known_user())
+        if (!$old_user || !$old_user->has_database_account())
             $user->mark_create(!$this->no_email, false);
         return $user;
     }

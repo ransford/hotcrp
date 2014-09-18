@@ -6,7 +6,7 @@
 require_once("src/initweb.php");
 require_once("src/papersearch.php");
 require_once("src/assigners.php");
-if ($Me->is_empty() || !$Me->privChair)
+if (!$Me->privChair)
     $Me->escape();
 
 // paper selection
@@ -22,7 +22,7 @@ if (isset($_REQUEST["pcs"]) && is_array($_REQUEST["pcs"])) {
 } else
     $pcsel = pcMembers();
 if (defval($_REQUEST, "a") == "prefconflict" && !isset($_REQUEST["t"])
-    && $Conf->setting("pc_seeall") > 0)
+    && $Conf->can_pc_see_all_submissions())
     $_REQUEST["t"] = "all";
 else if ($Conf->has_managed_submissions())
     $_REQUEST["t"] = defval($_REQUEST, "t", "unm");
@@ -161,13 +161,13 @@ function checkRequest(&$atype, &$reviewtype, $save) {
 
     if ($save)
         /* no check */;
-    else if ($atype == "rev" && rcvtint($_REQUEST["revct"], -1) <= 0) {
+    else if ($atype == "rev" && cvtint(@$_REQUEST["revct"], -1) <= 0) {
         $Error["rev"] = true;
         return $Conf->errorMsg("Enter the number of reviews you want to assign.");
-    } else if ($atype == "revadd" && rcvtint($_REQUEST["revaddct"], -1) <= 0) {
+    } else if ($atype == "revadd" && cvtint(@$_REQUEST["revaddct"], -1) <= 0) {
         $Error["revadd"] = true;
         return $Conf->errorMsg("You must assign at least one review.");
-    } else if ($atype == "revpc" && rcvtint($_REQUEST["revpcct"], -1) <= 0) {
+    } else if ($atype == "revpc" && cvtint(@$_REQUEST["revpcct"], -1) <= 0) {
         $Error["revpc"] = true;
         return $Conf->errorMsg("You must assign at least one review.");
     }
@@ -292,7 +292,7 @@ function doAssign() {
         Paper.outcome,
         topicInterestScore,
         coalesce(PRR.contactId, 0) as refused,
-        " . ($Conf->sversion >= 51 ? "Paper.managerContactId" : "0 as managerContactId") . "
+        Paper.managerContactId
         from Paper join PCMember
         left join PaperConflict on (Paper.paperId=PaperConflict.paperId and PCMember.contactId=PaperConflict.contactId)
         left join PaperReviewPreference on (Paper.paperId=PaperReviewPreference.paperId and PCMember.contactId=PaperReviewPreference.contactId)
@@ -366,12 +366,12 @@ function doAssign() {
     $papers = array();
     $loadlimit = null;
     if ($atype == "revadd")
-        $papers = array_fill_keys($papersel, rcvtint($_REQUEST["revaddct"]));
+        $papers = array_fill_keys($papersel, cvtint(@$_REQUEST["revaddct"]));
     else if ($atype == "revpc") {
-        $loadlimit = rcvtint($_REQUEST["revpcct"]);
+        $loadlimit = cvtint(@$_REQUEST["revpcct"]);
         $papers = array_fill_keys($papersel, ceil((count($pcm) * $loadlimit) / count($papersel)));
     } else if ($atype == "rev") {
-        $papers = array_fill_keys($papersel, rcvtint($_REQUEST["revct"]));
+        $papers = array_fill_keys($papersel, cvtint(@$_REQUEST["revct"]));
         $result = $Conf->qe("select paperId, count(reviewId) from PaperReview where reviewType=$reviewtype group by paperId");
         while (($row = edb_row($result)))
             if (isset($papers[$row[0]]))
@@ -422,7 +422,7 @@ function doAssign() {
 
         // traverse preferences in descending order until encountering an
         // assignable paper
-        while (($pg = current($pref_groups[$pc]))) {
+        while ($pref_groups[$pc] && ($pg = current($pref_groups[$pc]))) {
             // skip if no papers left
             if (!count($pg->pids)) {
                 next($pref_groups[$pc]);
@@ -489,7 +489,7 @@ else if (isset($_REQUEST["saveassign"])
          && isset($_REQUEST["assignment"]) && check_post()) {
     $assignset = new AssignmentSet($Me, true);
     $assignset->parse($_REQUEST["assignment"]);
-    $assignset->execute($Now);
+    $assignset->execute();
 }
 
 
@@ -593,7 +593,7 @@ $tOpt["all"] = "All papers";
 if (!isset($_REQUEST["t"]) || !isset($tOpt[$_REQUEST["t"]]))
     $_REQUEST["t"] = "s";
 $q = ($_REQUEST["q"] == "" ? "(All)" : $_REQUEST["q"]);
-echo "<input id='autoassignq' class='textlite temptextoff' type='text' size='40' name='q' value=\"", htmlspecialchars($q), "\" onfocus=\"autosub('requery',this)\" onchange='highlightUpdate(\"requery\")' title='Enter paper numbers or search terms' /> &nbsp;in &nbsp;",
+echo "<input id='autoassignq' class='temptextoff' type='text' size='40' name='q' value=\"", htmlspecialchars($q), "\" onfocus=\"autosub('requery',this)\" onchange='highlightUpdate(\"requery\")' title='Enter paper numbers or search terms' /> &nbsp;in &nbsp;",
     Ht::select("t", $tOpt, $_REQUEST["t"], array("onchange" => "highlightUpdate(\"requery\")")),
     " &nbsp; ", Ht::submit("requery", "List", array("id" => "requery"));
 $Conf->footerScript("mktemptext('autoassignq','(All)')");
@@ -602,7 +602,7 @@ if (isset($_REQUEST["requery"]) || isset($_REQUEST["prevpap"])) {
 <div class='g'></div>";
 
     $search = new PaperSearch($Me, array("t" => $_REQUEST["t"], "q" => $_REQUEST["q"],
-                                         "urlbase" => hoturl_site_relative("autoassign")));
+                                         "urlbase" => hoturl_site_relative_raw("autoassign")));
     $plist = new PaperList($search);
     $plist->display .= " reviewers ";
     $plist->papersel = array_fill_keys($papersel, 1);
@@ -621,36 +621,32 @@ echo "</div>\n";
 // action
 echo divClass("ass"), "<h3>Action</h3>", divClass("rev");
 doRadio("a", "rev", "Ensure each paper has <i>at least</i>");
-echo "&nbsp; <input type='text' class='textlite' name='revct' value=\"", htmlspecialchars(defval($_REQUEST, "revct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; ";
+echo "&nbsp; <input type='text' name='revct' value=\"", htmlspecialchars(defval($_REQUEST, "revct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; ";
 doSelect("revtype", array(REVIEW_PRIMARY => "primary", REVIEW_SECONDARY => "secondary", REVIEW_PC => "optional"));
 echo "&nbsp; review(s)</div>\n";
 
 echo divClass("revadd");
 doRadio("a", "revadd", "Assign");
-echo "&nbsp; <input type='text' class='textlite' name='revaddct' value=\"", htmlspecialchars(defval($_REQUEST, "revaddct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; ",
+echo "&nbsp; <input type='text' name='revaddct' value=\"", htmlspecialchars(defval($_REQUEST, "revaddct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; ",
     "<i>additional</i>&nbsp; ";
 doSelect("revaddtype", array(REVIEW_PRIMARY => "primary", REVIEW_SECONDARY => "secondary", REVIEW_PC => "optional"));
 echo "&nbsp; review(s) per paper</div>\n";
 
 echo divClass("revpc");
 doRadio("a", "revpc", "Assign each PC member");
-echo "&nbsp; <input type='text' class='textlite' name='revpcct' value=\"", htmlspecialchars(defval($_REQUEST, "revpcct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; additional&nbsp; ";
+echo "&nbsp; <input type='text' name='revpcct' value=\"", htmlspecialchars(defval($_REQUEST, "revpcct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; additional&nbsp; ";
 doSelect("revpctype", array(REVIEW_PRIMARY => "primary", REVIEW_SECONDARY => "secondary", REVIEW_PC => "optional"));
 echo "&nbsp; review(s) from this paper selection</div>\n";
 
 // Review round
-echo divClass("rev_roundtag");
-echo "<input style='visibility: hidden' type='radio' class='cb' name='a' value='rev_roundtag' disabled='disabled' />&nbsp;";
-echo "Review round: &nbsp;";
-$rev_roundtag = defval($_REQUEST, "rev_roundtag", $Conf->setting_data("rev_roundtag"));
-if (!$rev_roundtag)
-    $rev_roundtag = "(None)";
-echo "<input id='rev_roundtag' class='textlite temptextoff' type='text' size='15' name='rev_roundtag' value=\"",
-    htmlspecialchars($rev_roundtag),
-    "\" onfocus=\"autosub('assign',this)\" />",
-    " &nbsp;<a class='hint' href='", hoturl("help", "t=revround"), "'>What is this?</a></div>
-<div class='g'></div>\n";
-$Conf->footerScript("mktemptext('rev_roundtag','(None)')");
+$rev_roundtag = $Conf->setting_data("rev_roundtag");
+if (count($Conf->round_list()) > 1 || $rev_roundtag) {
+    echo divClass("rev_roundtag"), Ht::hidden("rev_roundtag", $rev_roundtag);
+    echo "<input style='visibility: hidden' type='radio' class='cb' name='a' value='rev_roundtag' disabled='disabled' />&nbsp;";
+    echo '<span class="hint">Current review round: &nbsp;', htmlspecialchars($rev_roundtag ? : "(no name)"),
+        ' &nbsp;<span class="barsep">|</span>&nbsp; <a href="', hoturl("settings", "group=reviews"), '">Configure rounds</a></span>';
+}
+echo "<div class='g'></div>\n";
 
 doRadio('a', 'prefconflict', 'Assign conflicts when PC members have review preferences of &minus;100 or less');
 echo "<br />\n";

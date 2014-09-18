@@ -8,7 +8,8 @@ require_once("src/initweb.php");
 // check for change-email capabilities
 function change_email_by_capability() {
     global $Conf, $Me;
-    $capdata = $Conf->check_capability($_REQUEST["changeemail"]);
+    $capmgr = $Conf->capability_manager($_REQUEST["changeemail"]);
+    $capdata = $capmgr->check($_REQUEST["changeemail"]);
     if (!$capdata || $capdata->capabilityType != CAPTYPE_CHANGEEMAIL
         || !($capdata->data = json_decode($capdata->data))
         || !@$capdata->data->uemail)
@@ -26,16 +27,16 @@ function change_email_by_capability() {
         $Acct->save_authored_papers($aupapers);
     if ($Acct->roles & Contact::ROLE_PCLIKE)
         $Conf->invalidateCaches(array("pc" => 1));
-    $Conf->delete_capability($capdata);
+    $capmgr->delete($capdata);
 
     $Conf->confirmMsg("Your email address has been changed.");
-    if (!$Me->is_known_user() || $Me->contactId == $Acct->contactId)
+    if (!$Me->has_database_account() || $Me->contactId == $Acct->contactId)
         $Me = $Acct->activate();
 }
 if (isset($_REQUEST["changeemail"]))
     change_email_by_capability();
 
-if ($Me->is_empty() || !$Me->is_known_user())
+if (!$Me->has_email())
     $Me->escape();
 $newProfile = false;
 $useRequest = false;
@@ -83,7 +84,8 @@ if (!$Acct
 
 $Acct->load_address();
 
-if ($Acct->contactId != $Me->contactId && $Acct->email
+if (($Acct->contactId != $Me->contactId || !$Me->has_database_account())
+    && $Acct->has_email()
     && !$Acct->firstName && !$Acct->lastName && !$Acct->affiliation
     && !isset($_REQUEST["post"])) {
     $result = $Conf->qe("select Paper.paperId, authorInformation from Paper join PaperConflict on (PaperConflict.paperId=Paper.paperId and PaperConflict.contactId=$Acct->contactId and PaperConflict.conflictType>=" . CONFLICT_AUTHOR . ")");
@@ -136,9 +138,12 @@ function pc_request_as_json($cj) {
 }
 
 function web_request_as_json($cj) {
-    global $Conf, $Acct, $newProfile, $UserStatus;
+    global $Conf, $Me, $Acct, $newProfile, $UserStatus;
 
-    $cj->id = $newProfile ? "new" : $Acct->contactId;
+    if ($newProfile || !$Acct->has_database_account())
+        $cj->id = "new";
+    else
+        $cj->id = $Acct->contactId;
 
     if (!Contact::external_login())
         $cj->email = trim(defval($_REQUEST, "uemail", ""));
@@ -153,17 +158,34 @@ function web_request_as_json($cj) {
         if (isset($_REQUEST[$k]))
             $cj->$k = $_REQUEST[$k];
 
-    if (!Contact::external_login() && !$newProfile) {
+    if (!Contact::external_login() && !$newProfile
+        && $Me->can_change_password($Acct)) {
         if (@$_REQUEST["whichpassword"] === "t" && @$_REQUEST["upasswordt"])
             $pw = $pw2 = @trim($_REQUEST["upasswordt"]);
         else {
             $pw = @trim($_REQUEST["upassword"]);
             $pw2 = @trim($_REQUEST["upassword2"]);
         }
-        if ($pw !== "" || $pw2 !== "") {
-            if ($pw !== $pw2)
-                $UserStatus->set_error("password", "Those passwords do not match.");
-            else
+        if ($pw === "" && $pw2 === "")
+            /* do nothing */;
+        else if ($pw !== $pw2)
+            $UserStatus->set_error("password", "Those passwords do not match.");
+        else if (!Contact::valid_password($pw))
+            $UserStatus->set_error("password", "Invalid new password.");
+        else if (!$Acct)
+            $cj->password_plaintext = $pw;
+        else {
+            $cdb_user = Contact::contactdb_find_by_email($Acct->email);
+            $oldpw = @trim($_REQUEST["oldpassword"]);
+            if (!$Me->can_change_password(null)
+                && ($oldpw === ""
+                    || (!$Acct->check_password($oldpw)
+                        && !($cdb_user && $cdb_user->check_password($oldpw)))))
+                $UserStatus->set_error("password", "Incorrect current password, new password ignored.");
+            else if ($cdb_user && !@$Opt["contactdb_noPasswords"]) {
+                $cdb_user->change_password($pw, true);
+                $cj->password = "*"; // mark valid login, require contactdb password
+            } else
                 $cj->password_plaintext = $pw;
         }
     }
@@ -195,9 +217,10 @@ function save_user($cj, $user_status) {
         else if (!validate_email($cj->email))
             return $user_status->set_error("email", "“" . htmlspecialchars($cj->email) . "” is not a valid email address.");
         if (!$newProfile && !$Me->privChair) {
+            $capmgr = $Conf->capability_manager($Acct);
             $rest = array("emailTo" => $cj->email,
-                          "capability" => $Conf->create_capability(CAPTYPE_CHANGEEMAIL, array("contactId" => $Acct->contactId, "timeExpires" => time() + 259200, "data" => json_encode(array("uemail" => $cj->email)))));
-            $prep = Mailer::prepareToSend("@changeemail", null, $Acct, null, $rest);
+                          "capability" => $capmgr->create(CAPTYPE_CHANGEEMAIL, array("user" => $Acct, "timeExpires" => time() + 259200, "data" => json_encode(array("uemail" => $cj->email)))));
+            $prep = Mailer::prepareToSend("@changeemail", null, $Acct, $rest);
             if ($prep["allowEmail"]) {
                 Mailer::sendPrepared($prep);
                 $Conf->warnMsg("Mail has been sent to " . htmlspecialchars($cj->email) . " to check that the address works. Use the link it contains to confirm your email change request.");
@@ -319,10 +342,12 @@ else if (isset($_REQUEST["register"]) && $newProfile
         $Conf->errorMsg("<div>" . join("</div><div style='margin-top:0.5em'>", $UserStatus->error_messages()) . "</div>");
     else {
         if ($newProfile)
-            $Conf->confirmMsg("Created an account for <a href=\"" . hoturl("profile", "u=" . urlencode($Acct->email)) . "\">" . Text::user_html_nolink($Acct) . "</a>.  A password has been emailed to that address.  You may now create another account.");
+            $Conf->confirmMsg("Created an account for <a href=\"" . hoturl("profile", "u=" . urlencode($Acct->email)) . "\">" . Text::user_html_nolink($Acct) . "</a>. A password has been emailed to that address. You may now create another account.");
         else {
             $Conf->confirmMsg("Account profile updated.");
-            if ($Acct->contactId != $Me->contactId)
+            if ($Acct->contactId == $Me->contactId)
+                $Me->update_trueuser(true);
+            else
                 $_REQUEST["u"] = $Acct->email;
         }
         if (isset($_REQUEST["redirect"]))
@@ -336,6 +361,8 @@ else if (isset($_REQUEST["register"]) && $newProfile
 } else if (isset($_REQUEST["merge"]) && !$newProfile
            && $Acct->contactId == $Me->contactId)
     go(hoturl("mergeaccounts"));
+else if (isset($_REQUEST["clickthrough"]))
+    UserActions::save_clickthrough($Acct);
 
 function databaseTracks($who) {
     global $Conf;
@@ -382,7 +409,7 @@ if (isset($_REQUEST["delete"]) && $OK && check_post()) {
         $Conf->errorMsg("Only administrators can delete users.");
     else if ($Acct->contactId == $Me->contactId)
         $Conf->errorMsg("You aren’t allowed to delete yourself.");
-    else {
+    else if ($Acct->has_database_account()) {
         $tracks = databaseTracks($Acct->contactId);
         if (count($tracks->soleAuthor))
             $Conf->errorMsg("This user can’t be deleted since they are sole contact for " . pluralx($tracks->soleAuthor, "paper") . " " . textArrayPapers($tracks->soleAuthor) . ".  You will be able to delete the user after deleting those papers or adding additional paper contacts.");
@@ -456,26 +483,26 @@ function echofield($type, $classname, $captiontext, $entrytext) {
     echo "<div class='", fcclass($classname), "'>", $captiontext, "</div>",
         "<div class='", feclass($classname), "'>", $entrytext, "</div></div>\n";
     if ($type > 2)
-        echo "<div class='clear'></div></div>\n";
+        echo '<hr class="c" />', "</div>\n";
 }
 
 function textinput($name, $value, $size, $id = false, $password = false) {
-    return "<input type=\"" . ($password ? "password" : "text")
-        . "\" class=\"textlite\" name=\"$name\" " . ($id ? "id=\"$id\" " : "")
-        . "size=\"$size\" value=\"$value\" onchange=\"hiliter(this)\" />";
+    return '<input type="' . ($password ? "password" : "text")
+        . '" name="' . $name . '" ' . ($id ? "id=\"$id\" " : "")
+        . 'size="' . $size . '" value="' . $value . '" />';
 }
 
 
 if ($newProfile)
     $Conf->header("Create Account", "account", actionBar("account"));
 else
-    $Conf->header($Me->contactId == $Acct->contactId ? "Your Profile" : "Account Profile", "account", actionBar("account", $Acct));
-$useRequest = (!$Acct->contactId && isset($_REQUEST["watchcomment"]))
+    $Conf->header($Me->email == $Acct->email ? "Your Profile" : "Account Profile", "account", actionBar("account", $Acct));
+$useRequest = (!$Acct->has_database_account() && isset($_REQUEST["watchcomment"]))
     || $UserStatus->nerrors;
 
 if (!$UserStatus->nerrors && @$Conf->session("freshlogin") === "redirect") {
     $Conf->save_session("freshlogin", null);
-    $ispc = ($Acct->roles & Contact::ROLE_PC) != 0;
+    $ispc = $Acct->is_pclike();
     $msgs = array();
     $amsg = "";
     if (!$Me->firstName && !$Me->lastName)
@@ -571,20 +598,36 @@ if ($Conf->setting("acct_addr") || $any_address || $Acct->voicePhoneNumber) {
     echofield(3, false, "ZIP/Postal code", textinput("zipCode", crpformvalue("zipCode"), 12));
     echofield(0, false, "Country", Countries::selector("country", (isset($_REQUEST["country"]) ? $_REQUEST["country"] : $Acct->country)));
     echofield(1, false, "Phone <span class='f-cx'>(optional)</span>", textinput("voicePhoneNumber", crpformvalue("voicePhoneNumber"), 24));
-    echo "<div class='clear'></div></div>\n";
+    echo '<hr class="c" /></div>', "\n";
 }
 
 
-if (!$newProfile && !isset($Opt["ldapLogin"]) && !isset($Opt["httpAuthLogin"])) {
-    echo "<div style='margin-top:20px'></div><div class='f-i'><div class='f-ix'>
-  <div class='", fcclass('password'), "'>New password</div>
-  <div class='", feclass('password'), "'><input class='textlite fn' type='password' name='upassword' size='24' value=\"\" onchange='hiliter(this)' />";
+if (!$newProfile && !isset($Opt["ldapLogin"]) && !isset($Opt["httpAuthLogin"])
+    && $Me->can_change_password($Acct)) {
+    echo '<div id="foldpassword" class="',
+        ($UserStatus->has_error("password") ? "fold3o" : "fold3c"),
+        '" style="margin-top:20px">';
+    // Hit a button to change your password
+    echo Ht::js_button("Change password", "fold('password',null,3)", array("class" => "fn3"));
+    // Display the following after the button is clicked
+    echo '<div class="fx3">';
+    if (!$Me->can_change_password(null)) {
+        echo '<div class="f-h">Enter your current password as well as your desired new password.</div>';
+        echo '<div class="f-i"><div class="', fcclass("password"), '">Current password</div>',
+            '<div class="', feclass("password"), '">', Ht::password("oldpassword", "", array("size" => 24)), '</div>',
+            '</div>';
+    }
+    if (@$Opt["contactdb_dsn"] && @$Opt["contactdb_loginFormHeading"])
+        echo $Opt["contactdb_loginFormHeading"];
+    echo '<div class="f-i"><div class="f-ix">
+  <div class="', fcclass("password"), '">New password</div>
+  <div class="', feclass("password"), '">', Ht::password("upassword", "", array("size" => 24, "class" => "fn"));
     if ($Me->privChair && $Acct->password_type == 0)
-        echo "<input class='textlite fx' type='text' name='upasswordt' size='24' value=\"", crpformvalue('upasswordt', 'password'), "\" onchange='hiliter(this)' />";
-    echo "</div>
-</div><div class='fn f-ix'>
-  <div class='", fcclass('password'), "'>Repeat password</div>
-  <div class='", feclass('password'), "'>", textinput("upassword2", "", 24, false, true), "</div>
+        echo Ht::entry("upasswordt", crpformvalue("upasswordt", "password"), array("size" => 24, "class" => "fx"));
+    echo '</div>
+</div><div class="fn f-ix">
+  <div class="', fcclass("password"), '">Repeat new password</div>
+  <div class="', feclass("password"), '">', Ht::password("upassword2", "", array("size" => 24)), "</div>
 </div>\n";
     if ($Acct->password_type == 0
         && ($Me->privChair || Contact::password_cleartext())) {
@@ -599,7 +642,8 @@ if (!$newProfile && !isset($Opt["ldapLogin"]) && !isset($Opt["httpAuthLogin"])) 
         }
         echo "</div>\n";
     }
-    echo "  <div class='clear'></div></div>\n\n";
+    echo '  <hr class="c" />';
+    echo "</div></div>\n\n";
 }
 
 
@@ -613,7 +657,7 @@ name,email,affiliation
 John Adams,john@earbox.org,UC Berkeley
 \"Adams, John Quincy\",quincy@whitehouse.gov
 </pre>\n",
-        "<div class='g'></div>Upload: <input type='file' name='bulk' size='30' onchange='hiliter(this)' />",
+        "<div class='g'></div>Upload: <input type='file' name='bulk' size='30' />",
         "</td></tr></table></div>\n\n";
 }
 
@@ -646,7 +690,7 @@ if ($newProfile || $Acct->contactId != $Me->contactId || $Me->privChair) {
                    "pc" => "PC member",
                    "no" => "Not on the PC") as $k => $v) {
         echo Ht::radio_h("pctype", $k, $pcrole === $k,
-                          array("id" => "pctype_$k", "onchange" => "hiliter(this);fold('account',\$\$('pctype_no').checked,1)")),
+                          array("id" => "pctype_$k", "onchange" => "fold('account',\$\$('pctype_no').checked,1)")),
             "&nbsp;", Ht::label($v), "<br />\n";
     }
 
@@ -669,7 +713,7 @@ if ($newProfile || $Acct->isPC || $Me->privChair) {
     We use this information when assigning reviews.
     For example: &ldquo;<tt>Ping Yen Zhang (INRIA)</tt>&rdquo;
     or, for a whole institution, &ldquo;<tt>INRIA</tt>&rdquo;.</div>
-    <textarea class='textlite' name='collaborators' rows='5' cols='50' onchange='hiliter(this)'>", crpformvalue("collaborators"), "</textarea></td>
+    <textarea name='collaborators' rows='5' cols='50'>", crpformvalue("collaborators"), "</textarea></td>
 </tr>\n\n";
 
     $topics = $Conf->topic_map();
@@ -697,7 +741,7 @@ if ($newProfile || $Acct->isPC || $Me->privChair) {
     }
 
 
-    if ($Conf->sversion >= 35 && ($Me->privChair || @$formcj->tags)) {
+    if ($Me->privChair || @$formcj->tags) {
         if (is_object(@$formcj->tags))
             $tags = array_keys(get_object_vars($formcj->tags));
         else if (is_array(@$formcj->tags))
@@ -782,5 +826,6 @@ foreach ($buttons as $b) {
 echo "    </tr>\n    </table></div></td>\n</tr>
 </table></div></form>\n";
 
+$Conf->footerScript("hiliter_children('#accountform');jQuery('textarea').autogrow()");
 $Conf->footerScript("crpfocus(\"account\")");
 $Conf->footer();

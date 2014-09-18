@@ -4,16 +4,16 @@
 // Distributed under an MIT-like license; see LICENSE
 
 require_once("src/initweb.php");
-if ($Me->is_empty() || !$Me->privChair)
+if (!$Me->privChair)
     $Me->escape();
 
 if (defval($_REQUEST, "page", "") == "earliest")
     $page = false;
-else if (($page = rcvtint($_REQUEST["page"], -1)) <= 0)
+else if (($page = cvtint(@$_REQUEST["page"], -1)) <= 0)
     $page = 1;
-if (($count = rcvtint($_REQUEST["n"], -1)) <= 0)
+if (($count = cvtint(@$_REQUEST["n"], -1)) <= 0)
     $count = 25;
-if (($offset = rcvtint($_REQUEST["offset"], -1)) < 0 || $offset >= $count)
+if (($offset = cvtint(@$_REQUEST["offset"], -1)) < 0 || $offset >= $count)
     $offset = 0;
 if ($offset == 0 || $page == 1) {
     $start = ($page - 1) * $count;
@@ -84,7 +84,7 @@ if (($str = $_REQUEST["q"])) {
     $wheres[] = "(" . join(" or ", $where) . ")";
 }
 
-if (($count = rcvtint($_REQUEST["n"])) <= 0) {
+if (($count = cvtint(@$_REQUEST["n"])) <= 0) {
     $Conf->errorMsg("\"Show <i>n</i> records\" requires a number greater than 0.");
     $Eclass["n"] = " error";
     $count = 25;
@@ -102,24 +102,23 @@ if ($_REQUEST["date"] != "now" && isset($_REQUEST["search"]))
 function searchbar() {
     global $Conf, $Eclass, $page, $start, $count, $nrows, $maxNrows, $nlinks, $offset;
 
-    echo "<form method='get' action='", hoturl("log"), "' accept-charset='UTF-8'>
-<table id='searchform'><tr>
+    echo Ht::form_div(hoturl("log"), array("method" => "get")), "<table id='searchform'><tr>
   <td class='lxcaption", $Eclass['q'], "'>With <b>any</b> of the words</td>
-  <td class='lentry", $Eclass['q'], "'><input class='textlite' type='text' size='40' name='q' value=\"", htmlspecialchars(defval($_REQUEST, "q", "")), "\" /><span class='sep'></span></td>
+  <td class='lentry", $Eclass['q'], "'><input type='text' size='40' name='q' value=\"", htmlspecialchars(defval($_REQUEST, "q", "")), "\" /><span class='sep'></span></td>
   <td rowspan='3'>", Ht::submit("search", "Search"), "</td>
 </tr><tr>
   <td class='lxcaption", $Eclass['pap'], "'>Concerning paper(s)</td>
-  <td class='lentry", $Eclass['pap'], "'><input class='textlite' type='text' size='40' name='pap' value=\"", htmlspecialchars(defval($_REQUEST, "pap", "")), "\" /></td>
+  <td class='lentry", $Eclass['pap'], "'><input type='text' size='40' name='pap' value=\"", htmlspecialchars(defval($_REQUEST, "pap", "")), "\" /></td>
 </tr><tr>
   <td class='lxcaption", $Eclass['acct'], "'>Concerning account(s)</td>
-  <td class='lentry'><input class='textlite' type='text' size='40' name='acct' value=\"", htmlspecialchars(defval($_REQUEST, "acct", "")), "\" /></td>
+  <td class='lentry'><input type='text' size='40' name='acct' value=\"", htmlspecialchars(defval($_REQUEST, "acct", "")), "\" /></td>
 </tr><tr>
   <td class='lxcaption", $Eclass['n'], "'>Show</td>
-  <td class='lentry", $Eclass['n'], "'><input class='textlite' type='text' size='3' name='n' value=\"", htmlspecialchars($_REQUEST["n"]), "\" /> &nbsp;records at a time</td>
+  <td class='lentry", $Eclass['n'], "'><input type='text' size='3' name='n' value=\"", htmlspecialchars($_REQUEST["n"]), "\" /> &nbsp;records at a time</td>
 </tr><tr>
   <td class='lxcaption", $Eclass['date'], "'>Starting at</td>
-  <td class='lentry", $Eclass['date'], "'><input class='textlite' type='text' size='40' name='date' value=\"", htmlspecialchars($_REQUEST["date"]), "\" /></td>
-</tr></table></form>";
+  <td class='lentry", $Eclass['date'], "'><input type='text' size='40' name='date' value=\"", htmlspecialchars($_REQUEST["date"]), "\" /></td>
+</tr></table></div></form>";
 
     if ($nrows > 0 || $page > 1) {
         $urls = array();
@@ -151,14 +150,6 @@ function searchbar() {
         echo "</div></td><td id='oldest'><div>";
         if ($nrows > $count)
             echo "&nbsp;&nbsp;|&nbsp; <a href='$url&amp;page=earliest'><strong>Oldest</strong></a>";
-        /* echo "</div></td><td id='gopage'><div>";
-        if ($page > 1 || $nrows > $count) {
-            echo "&nbsp;&nbsp;|&nbsp; Page: <form method='get' action='", hoturl("log"), "' accept-charset='UTF-8'>";
-            foreach (array("q", "pap", "acct", "n", "offset") as $x)
-                if ($_REQUEST[$x])
-                    echo Ht::hidden($x, $_REQUEST[$x]);
-            echo "<input class='textlite' type='text' size='3' name='page' value='' /> &nbsp;", Ht::submit("gopage", "Go"), "</form>";
-            } */
         echo "</div></td></tr></table><div class='g'></div>\n";
     }
 }

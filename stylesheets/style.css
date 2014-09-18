@@ -181,6 +181,9 @@ span.lgsep {
 div.lg { /* large gap */
 	margin: 1.5em 0;
 }
+div.mg { /* medium gap */
+	margin: 1em 0;
+}
 div.g { /* small gap */
 	margin: 0.65em 0;
 }
@@ -197,8 +200,7 @@ form {
 	margin-bottom: 0;
 	display: inline;
 }
-div.inform {
-	margin: 0;
+div.inline {
 	display: inline;
 }
 
@@ -211,7 +213,7 @@ div.body {
 }
 body#paper_view div.body, body#paper_edit div.body,
 body#review div.body, body#comment div.body,
-body#assign div.body, body#offrev div.body {
+body#assign div.body, body#offline div.body {
 	margin: 0 22px 0 12px;
 }
 body#account div.body, body#scorehelp div.body, body#settings div.body {
@@ -480,7 +482,7 @@ table.ppltable td.pl_topics span.topic4 {
 span.optvalue {
 	color: #555555;
 }
-span.dim {
+.dim {
 	color: #777777;
 }
 
@@ -799,19 +801,14 @@ td.rxcaption {
 	text-align: right;
 	padding: 3px 0.5em 3px 0;
 }
-td.srcaption {
-	text-align: right;
-	padding: 3px 0.75em;
-	font-weight: bold;
-}
 td.sentry {
 	padding: 3px 0.75em;
 }
-td.lcaption {
+th.lcaption, td.lcaption {
 	padding: 3px 1em 3px 0;
 	font-weight: bold;
 }
-td.lxcaption {
+th.lxcaption, td.lxcaption {
 	padding: 3px 1em 3px 0;
 }
 td.mcaption {
@@ -844,13 +841,13 @@ td.hint {
 div.hint {
 	margin-bottom: 0.5ex;
 }
-td.hint, div.hint, span.hint,
+td.hint, div.hint, span.hint, p.hint,
 .revvis, .revevis {
 	font-weight: normal;
 	font-style: normal;
 	color: #555555;
 }
-td.hint, div.hint, span.hint, a.hint {
+td.hint, div.hint, span.hint, p.hint, a.hint {
 	font-size: smaller;
 }
 td.caption span.hint {
@@ -869,12 +866,20 @@ td h2, td h3 {
 
 
 /* settings */
-h3.settings {
+h3.settings, h3.helppage, h4.helppage {
 	color: #565d91;
-	margin-bottom: 0.5em;
 }
-h3.settings.g {
-	margin-top: 2em;
+h2.helppage {
+	font-size: 140%;
+}
+h3.settings, h3.helppage {
+	margin: 2em 0 0.5em;
+}
+h3.settings:first-child, h3.helppage:first-child {
+	margin-top: 0.5em;
+}
+h4.helppage {
+	margin: 0.8em 0 0;
 }
 table#foldtag_color th {
 	text-align: left;
@@ -884,6 +889,40 @@ table#foldtag_color th {
 
 
 /* help pages */
+div.helppage_topiccontainer {
+	width: 140px;
+	font-size: smaller;
+	float: left;
+	box-shadow: 0 1px 5px #46678c;
+	border-radius: 2px;
+}
+div.helppage_topiclist {
+	padding: 6px 0;
+}
+div.helppage_topic {
+	padding: 3px 8px 3px 16px;
+	cursor: pointer;
+}
+div.helppage_topic_on {
+	font-weight: bold;
+	background: #e6e1cf;
+	background: linear-gradient(to bottom, rgba(230,225,207,0), #e6e1cf 4px, #e6e1cf 50%, transparent 50%),
+		linear-gradient(to top, rgba(230,225,207,0), #e6e1cf 4px, #e6e1cf 50%, transparent 50%);
+	padding: 4px 8px 4px 16px;
+}
+div.helppage_content {
+	margin-left: 164px;
+	padding-bottom: 2em;
+}
+div.helppagetext {
+	max-width: 42em;
+}
+table.helppage {
+	margin-left: -0.75em;
+}
+table.helppage td.sentry form div.nowrap {
+	margin-left: -1px;
+}
 ul.compact {
 	margin-top: 0.5em;
 	margin-bottom: 0;
@@ -951,9 +990,12 @@ td.padl, th.padl, div.padl {
 td.padlb, th.padlb, div.padlb {
 	padding-left: 2em;
 }
-div.error, div.error input, td.error, td.error input,
+div.error, div.error input, td.error, td.error input, input.error,
 tr.error > td, tr.error > td input {
 	font-weight: bold;
+	color: #ff0000;
+}
+span.setting_error, label.setting_error, input.setting_error {
 	color: #ff0000;
 }
 td.lentry.error input, div.error input {
@@ -1015,7 +1057,7 @@ span.textlite {
 	padding: 0 4px;
 	background: #fcfcfc;
 }
-input.textlite, textarea {
+input[type=text], input[type=password], textarea {
 	font-size: 100%;
 }
 input.textlite-tt, textarea.tt {
@@ -1026,6 +1068,9 @@ input.textlite-tt, textarea.tt {
 }
 .reviewtext, div#popup_ref textarea {
 	width: 99%;
+}
+.reviewtext {
+	max-width: 42em;
 }
 textarea[name=comment] {
 	min-height: 5em;
@@ -1293,6 +1338,15 @@ table.pt_buttons td.ptb_explain {
 table.pt_buttons td.ptb_button {
 	padding: 0 1em 0 0;
 }
+div.aabut {
+	float: left;
+	text-align: center;
+	margin: 0 1em 0 0;
+}
+div.aabutsep {
+	float: left;
+	padding: 0 0.5em;
+}
 
 .pltable_full_ctr {
 	padding: 0.75em 0.5em;
@@ -1373,7 +1427,9 @@ div.pl_revtype_round {
 }
 .pl_revstat,
 table.pltable th.pl_revstat,
-table.pltable th.pl_formula {
+table.pltable th.pl_formula,
+table.pltable th.pl_tag,
+table.pltable th.pl_tagval {
 	text-align: center;
 }
 .pl_sel,
@@ -1403,7 +1459,7 @@ span.pl_rownum {
 	color: #333333;
 }
 td.pl_id, td.pl_topicscore, td.pl_revpref,
-td.pl_desirability, td.pl_formula {
+td.pl_desirability, td.pl_tag, td.pl_tagval, td.pl_formula {
 	text-align: right;
 	padding-left: 0.4em;
 	padding-right: 0.4em;
@@ -1546,12 +1602,18 @@ div.merror pre {
 	border: 1px dashed #eecccc;
 }
 
-hr.hr {
+hr {
 	margin: 0.75em 0;
 	border: 0 none;
 	height: 1px;
 	color: #9999cc; /* for IE6 */
 	background-color: #9999cc;
+}
+hr.c {
+	margin: 0;
+	border: 0 none;
+	height: 0;
+	clear: both;
 }
 div.msgpg { /* message-paper gap */
 	margin: 2ex 0;
@@ -1805,7 +1867,7 @@ tr.pl.smalltag, tr.plx.smalltag {
 	color: #999999;
 }
 
-body#offrev td#upload {
+body#offline td#upload {
 	padding-left: 3em;
 }
 
@@ -1984,6 +2046,8 @@ select#foldlead_d, select#foldshepherd_d, select#folddecision_d, select#foldmana
 	box-shadow: 0 0 5px #46678c;
 	-moz-box-shadow: 0 0 5px #46678c;
 	-webkit-box-shadow: 0 0 5px #46678c;
+	z-index: 1000;
+	color: black;
 }
 #taghelp_p {
 	top: 0%;
@@ -2013,6 +2077,12 @@ select#foldlead_d, select#foldshepherd_d, select#folddecision_d, select#foldmana
 	background-color: rgba(246, 244, 189, 0.88);
 	border: 1px solid #b8af25;
 }
+.bubble.errorbubble {
+	max-width: 20em;
+	background-color: rgba(255, 238, 238, 0.88);
+	border: 2px solid red;
+	font-size: smaller;
+}
 .bubble > .bubcontent {
 	margin: 2px 0;
 }
@@ -2024,8 +2094,14 @@ select#foldlead_d, select#foldshepherd_d, select#folddecision_d, select#foldmana
 .bubtail0.l, .bubtail0.r {
 	border-color: transparent #b8af25;
 }
+.bubtail0.errorbubble.l, .bubtail0.errorbubble.r {
+	border-color: transparent red;
+}
 .bubtail1.l, .bubtail1.r {
 	border-color: transparent rgba(246, 244, 189, 0.9);
+}
+.bubtail1.errorbubble.l, .bubtail1.errorbubble.r {
+	border-color: transparent rgba(255, 238, 238, 0.9);
 }
 .bubtail0.l {
 	left: -10px;
@@ -2194,6 +2270,9 @@ div.revcard {
 	-webkit-box-shadow: 0 1px 5px #46678c;
 	border-radius: 2px;
 }
+body#offline div.revcard {
+	margin: 16px 7em;
+}
 div.revcard_head {
 	padding: 3px 12px 4px 12px;
 }
@@ -2310,7 +2389,7 @@ div.cmtcard_head {
 }
 div.cmtcard_body {
 	background: #ffffff;
-	padding: 6px 12px;
+	padding: 6px 12px 3px;
 	border-radius: 2px;
 }
 div.cmtcard h3 {
@@ -2346,11 +2425,50 @@ div.cmtt {
 div.cmtt div.floatright {
 	padding-left: 0.5em;
 }
-div.cmtv {
-	padding: 0 0 4px;
+div.cmtg div.xinfo, div.cmtg div.xconfirm, div.cmtg div.xwarning, div.cmtg div.xmerror {
+	margin: 3px -12px 6px;
+	padding: 5px 12px;
+	font-size: smaller;
+	border: 0;
+}
+div.cmtg div.xinfo {
+	background: #eeeeff;
+	background: linear-gradient(to bottom, rgba(238,238,255,0), #eeeeff 4px, #eeeeff 50%, transparent 50%),
+		linear-gradient(to top, rgba(238,238,255,0), #eeeeff 4px, #eeeeff 50%, transparent 50%);
+}
+div.cmtg div.xconfirm {
+	background: #eeffee;
+	background: linear-gradient(to bottom, rgba(238,255,238,0), #eeffee 4px, #eeffee 50%, transparent 50%),
+		linear-gradient(to top, rgba(238,255,238,0), #eeffee 4px, #eeffee 50%, transparent 50%);
+}
+div.cmtg div.xwarning {
+	background: #ffffdd;
+	background: linear-gradient(to bottom, rgba(255,255,221,0), #ffffdd 4px, #ffffdd 50%, transparent 50%),
+		linear-gradient(to top, rgba(255,255,221,0), #ffffdd 4px, #ffffdd 50%, transparent 50%);
+}
+div.cmtg div.xmerror {
+	border-top: 2px solid red;
+	border-bottom: 2px solid red;
+}
+div.response div.cmtg div.xinfo {
+	background: rgba(255, 221, 193, 0.5);
+	background: linear-gradient(to bottom, rgba(255,221,193,0), rgba(255,221,193,0.4) 4px, rgba(255,221,193,0.4) 50%, transparent 50%),
+		linear-gradient(to top, rgba(255,221,193,0), rgba(255,221,193,0.4) 4px, rgba(255,221,193,0.4) 50%, transparent 50%);
+}
+div.aab {
+	margin: 0.2em -12px 8px;
+	padding: 0.5em 12px;
+	background: none;
+	border-radius: 0;
+}
+div.aahc.alert div.aab {
+	background: #ffaaaa;
+	background: linear-gradient(to bottom, rgba(255,170,170,0), #ffaaaa 4px, #ffaaaa 50%, transparent 50%),
+		linear-gradient(to top, rgba(255,170,170,0), #ffaaaa 4px, #ffaaaa 50%, transparent 50%);
 }
 div.revtext, div.cmttext {
 	white-space: pre-wrap;
+	max-width: 42em;
 }
 div#foldaddcomment div.cmtv {
 	padding-bottom: 0;
@@ -2371,6 +2489,9 @@ div.cmthint {
 
 .words {
 	color: #555555;
+}
+div.aabut .words {
+	padding-top: 2px;
 }
 .wordsclose {
 	color: #cc0000;
@@ -2444,6 +2565,9 @@ div.cmthint {
 }
 .mhnp, .mhdd, .mhdp {
 	padding: 2px 4px;
+}
+td.mhcb {
+	padding-right: 0.5em;
 }
 .mhb {
 	padding: 4px;
@@ -2565,7 +2689,7 @@ div.popup_actions {
 }
 
 /* scores */
-div.scorechart {
+div.scorechart, div.inb {
 	display: inline-block;
 }
 div.sc {

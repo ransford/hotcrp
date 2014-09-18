@@ -10,6 +10,8 @@ if ($Me->is_empty())
     $Me->escape();
 $_REQUEST["forceShow"] = 1;
 $Error = $Warning = array();
+// ensure site contact exists before locking tables
+Contact::site_contact();
 
 
 // header
@@ -93,8 +95,8 @@ function retractRequest($email, $prow, $confirm = true) {
     if ($row && $row->reviewModified > 0)
         return $Conf->errorMsg("You can’t retract that review request since the reviewer has already started their review.");
     if (!$Me->allowAdminister($prow)
-        && (($row && $row->requestedBy && $Me->cid != $row->requestedBy)
-            || ($row2 && $row2->requestedBy && $Me->cid != $row2->requestedBy)))
+        && (($row && $row->requestedBy && $Me->contactId != $row->requestedBy)
+            || ($row2 && $row2->requestedBy && $Me->contactId != $row2->requestedBy)))
         return $Conf->errorMsg("You can’t retract that review request since you didn’t make the request in the first place.");
 
     // at this point, success; remove the review request
@@ -106,9 +108,11 @@ function retractRequest($email, $prow, $confirm = true) {
     if (defval($row, "reviewToken", 0) != 0)
         $Conf->settings["rev_tokens"] = -1;
     // send confirmation email, if the review site is open
-    if ($Conf->timeReviewOpen() && $row) {
-        $Requester = Contact::make($row);
-        Mailer::send("@retractrequest", $prow, $Requester, $Me, array("cc" => Text::user_email_to($Me)));
+    if ($Conf->time_review_open() && $row) {
+        $Reviewer = Contact::make($row);
+        Mailer::send("@retractrequest", $prow, $Reviewer,
+                     array("requester_contact" => $Me,
+                           "cc" => Text::user_email_to($Me)));
     }
 
     // confirmation message
@@ -135,21 +139,8 @@ function pcAssignments() {
         if (isset($pcm[$_REQUEST["reviewer"]]))
             $where = "where PCMember.contactId='" . $_REQUEST["reviewer"] . "'";
     }
-    if (isset($_REQUEST["rev_roundtag"])) {
-        if (($rev_roundtag = $_REQUEST["rev_roundtag"]) == "(None)")
-            $rev_roundtag = "";
-        if ($rev_roundtag && !preg_match('/^[a-zA-Z0-9]+$/', $rev_roundtag)) {
-            $Conf->errorMsg("The review round must contain only letters and numbers.");
-            $rev_roundtag = "";
-        }
-        if ($rev_roundtag)
-            $Conf->save_setting("rev_roundtag", 1, $rev_roundtag);
-        else
-            $Conf->save_setting("rev_roundtag", null);
-    }
 
-    $Conf->qe("lock tables PaperReview write, PaperReviewRefused write, PaperConflict write, PCMember read, ContactInfo read, ActionLog write" . $Conf->tagRoundLocker(true));
-    $when = time();
+    $Conf->qe("lock tables PaperReview write, PaperReviewRefused write, PaperConflict write, PCMember read, ContactInfo read, ActionLog write, Settings write");
 
     // don't record separate PC conflicts on author conflicts
     $result = $Conf->qe("select PCMember.contactId,
@@ -175,7 +166,7 @@ function pcAssignments() {
                 || $pctype == REVIEW_SECONDARY || $pctype == REVIEW_PC)
             && ($pctype == 0
                 || $pcm[$row->contactId]->allow_review_assignment($prow)))
-            $Me->assign_paper($prow->paperId, $row, $row->contactId, $pctype, $when);
+            $Me->assign_paper($prow->paperId, $row, $row->contactId, $pctype);
     }
 }
 
@@ -241,7 +232,7 @@ function requestReview($email) {
     $reason = trim(defval($_REQUEST, "reason", ""));
 
     $otherTables = ($Conf->setting("extrev_chairreq") ? ", ReviewRequest write" : "");
-    $Conf->qe("lock tables PaperReview write, PaperReviewRefused write, ContactInfo read, PaperConflict read" . $otherTables);
+    $Conf->qe("lock tables PaperReview write, PaperReviewRefused write, ContactInfo read, PaperConflict read, ActionLog write" . $otherTables);
     // NB caller unlocks tables on error
 
     // check for outstanding review request
@@ -254,31 +245,27 @@ function requestReview($email) {
     if ($Conf->setting("extrev_chairreq")) {
         $result = $Conf->qe("select firstName, lastName, ContactInfo.email, ContactInfo.contactId from ReviewRequest join ContactInfo on (ContactInfo.contactId=ReviewRequest.requestedBy) where paperId=$prow->paperId and ReviewRequest.email='" . sqlq($Them->email) . "'");
         if (($row = edb_orow($result))) {
-            $Requester = $row;
+            $Requester = Contact::make($row);
             $Conf->qe("delete from ReviewRequest where paperId=$prow->paperId and ReviewRequest.email='" . sqlq($Them->email) . "'");
         }
     }
 
     // store the review request
-    $qa = $qb = "";
-    if ($Conf->sversion >= 46) {
-        $now = time();
-        $qa .= ", timeRequested, timeRequestNotified";
-        $qb .= ", $now, $now";
-    }
-    $Conf->qe("insert into PaperReview (paperId, contactId, reviewType, requestedBy$qa) values ($prow->paperId, $Them->contactId, " . REVIEW_EXTERNAL . ", $Requester->contactId$qb)");
+    $Me->assign_paper($prow->paperId, null, $Them->contactId, REVIEW_EXTERNAL,
+                      array("mark_notify" => true));
 
     // mark secondary as delegated
     $Conf->qe("update PaperReview set reviewNeedsSubmit=-1 where paperId=$prow->paperId and reviewType=" . REVIEW_SECONDARY . " and contactId=$Requester->contactId and reviewSubmitted is null and reviewNeedsSubmit=1");
 
     // send confirmation email
-    Mailer::send("@requestreview", $prow, $Them, $Requester, array("reason" => $reason));
+    Mailer::send("@requestreview", $prow, $Them,
+                 array("requester_contact" => $Requester,
+                       "other_contact" => $Requester, // backwards compat
+                       "reason" => $reason));
 
     // confirmation message
     $Conf->confirmMsg("Created a request to review paper #$prow->paperId.");
     $Conf->qx("unlock tables");
-    $Me->log_activity("Asked $Them->email to review", $prow);
-
     return true;
 }
 
@@ -299,10 +286,15 @@ function proposeReview($email) {
 
     // check for outstanding review request
     $result = $Conf->qe("insert into ReviewRequest (paperId, name, email, requestedBy, reason)
-        values ($prow->paperId, '" . sqlq($name) . "', '" . sqlq($email) . "', $Me->cid, '" . sqlq(trim($_REQUEST["reason"])) . "') on duplicate key update paperId=paperId");
+        values ($prow->paperId, '" . sqlq($name) . "', '" . sqlq($email) . "', $Me->contactId, '" . sqlq(trim($_REQUEST["reason"])) . "') on duplicate key update paperId=paperId");
 
     // send confirmation email
-    Mailer::send_manager("@proposereview", $prow, $Me, array("permissionContact" => $Me, "cc" => Text::user_email_to($Me), "contact3" => (object) array("fullName" => $name, "email" => $email), "reason" => $reason));
+    Mailer::send_manager("@proposereview", $prow,
+                         array("permissionContact" => $Me,
+                               "cc" => Text::user_email_to($Me),
+                               "requester_contact" => $Me,
+                               "reviewer_contact" => (object) array("fullName" => $name, "email" => $email),
+                               "reason" => $reason));
 
     // confirmation message
     $Conf->confirmMsg("Proposed that " . htmlspecialchars("$name <$email>") . " review paper #$prow->paperId.  The chair must approve this proposal for it to take effect.");
@@ -328,21 +320,10 @@ function unassignedAnonymousContact() {
     }
 }
 
-function unassignedReviewToken() {
-    global $Conf;
-    while (1) {
-        $token = mt_rand(1, 2000000000);
-        $result = $Conf->qe("select reviewId from PaperReview where reviewToken=$token", "while checking review token");
-        if (edb_nrows($result) == 0)
-            return $token;
-    }
-}
-
 function createAnonymousReview() {
-    global $Conf, $Me, $Opt, $prow, $rrows;
+    global $Conf, $Me, $Now, $Opt, $prow, $rrows;
 
-    $now = time();
-    $Conf->qe("lock tables PaperReview write, PaperReviewRefused write, ContactInfo write, PaperConflict read");
+    $Conf->qe("lock tables PaperReview write, PaperReviewRefused write, ContactInfo write, PaperConflict read, ActionLog write");
 
     // find an unassigned anonymous review contact
     $contactemail = unassignedAnonymousContact();
@@ -351,30 +332,23 @@ function createAnonymousReview() {
         $row = edb_row($result);
         $reqId = $row[0];
     } else {
-        $result = $Conf->qe("insert into ContactInfo
-                (firstName, lastName, email, affiliation, password, creationTime)
-                values ('Jane Q.', 'Public', '" . sqlq($contactemail) . "', 'Unaffiliated', '" . sqlq(Contact::random_password(20)) . "', $now)");
+        $result = Dbl::qe("insert into ContactInfo set firstName='Jane Q.', lastName='Public', email=?, affiliation='Unaffiliated', password='', creationTime=$Now", $contactemail);
         if (!$result)
             return $result;
-        $reqId = $Conf->lastInsertId();
+        $reqId = $result->insert_id;
     }
 
     // store the review request
-    $token = unassignedReviewToken();
-    $qa = $qb = "";
-    if ($Conf->sversion >= 46) {
-        $qa .= ", timeRequested, timeRequestNotified";
-        $qb .= ", $now, $now";  /* no way to notify, so count as notified already */
+    $reviewId = $Me->assign_paper($prow->paperId, null, $reqId, REVIEW_EXTERNAL,
+                                  array("mark_notify" => true, "token" => true));
+    if ($reviewId) {
+        $result = Dbl::ql("select reviewToken from PaperReview where reviewId=$reviewId");
+        $row = edb_row($result);
+        $Conf->confirmMsg("Created a new anonymous review for paper #$prow->paperId. The review token is " . encode_token((int) $row[0]) . ".");
     }
-    $Conf->qe("insert into PaperReview (paperId, contactId, reviewType, requestedBy, reviewToken$qa)
-                values ($prow->paperId, $reqId, " . REVIEW_EXTERNAL . ", $Me->cid, $token$qb)");
-    $Conf->confirmMsg("Created a new anonymous review for paper #$prow->paperId. The review token is " . encode_token((int) $token) . ".");
 
     $Conf->qx("unlock tables");
-    $Me->log_activity("Created $contactemail review", $prow);
-    if ($token)
-        $Conf->updateRevTokensSetting(true);
-
+    $Conf->updateRevTokensSetting(true);
     return true;
 }
 
@@ -423,7 +397,8 @@ if (isset($_REQUEST["deny"]) && $Me->allowAdminister($prow) && check_post()
             $Conf->qe("insert into PaperReviewRefused (paperId, contactId, requestedBy, reason) values ($prow->paperId, $reqId, $Requester->contactId, 'request denied by chair')");
 
         // send anticonfirmation email
-        Mailer::send("@denyreviewrequest", $prow, $Requester, (object) array("fullName" => trim(defval($_REQUEST, "name", "")), "email" => $email));
+        Mailer::send("@denyreviewrequest", $prow, $Requester,
+                     array("reviewer_contact" => (object) array("fullName" => trim(defval($_REQUEST, "name", "")), "email" => $email)));
 
         $Conf->confirmMsg("Proposed reviewer denied.");
     } else
@@ -436,11 +411,11 @@ if (isset($_REQUEST["deny"]) && $Me->allowAdminister($prow) && check_post()
 
 // add primary or secondary reviewer
 if (isset($_REQUEST["addpc"]) && $Me->allowAdminister($prow) && check_post()) {
-    if (($pcid = rcvtint($_REQUEST["pcid"])) <= 0)
+    if (($pcid = cvtint(@$_REQUEST["pcid"])) <= 0)
         $Conf->errorMsg("Enter a PC member.");
-    else if (($pctype = rcvtint($_REQUEST["pctype"])) == REVIEW_PRIMARY
+    else if (($pctype = cvtint(@$_REQUEST["pctype"])) == REVIEW_PRIMARY
              || $pctype == REVIEW_SECONDARY || $pctype == REVIEW_PC) {
-        $Me->assign_paper($prow->paperId, findRrow($pcid), $pcid, $pctype, time());
+        $Me->assign_paper($prow->paperId, findRrow($pcid), $pcid, $pctype);
         $Conf->updateRevTokensSetting(false);
     }
     loadRows();
@@ -512,16 +487,24 @@ if ($Me->canAdminister($prow)) {
     echo '<div class="papcard_sep"></div>',
         Ht::form($loginUrl, array("id" => "ass")), '<div class="aahc">',
         "<div class='papt'><span class='papfn'>PC review assignments</span>",
-        "<div class='clear'></div></div>",
+        '<hr class="c" /></div>',
         "<div class='paphint'>Review preferences display as &ldquo;P#&rdquo;";
     if ($Conf->has_topics())
         echo ", topic scores as &ldquo;T#&rdquo;";
-    echo ".</div><div class='papv' style='padding-left:0'>";
+    echo ".";
+
+    $rev_roundtag = $Conf->setting_data("rev_roundtag");
+    if (count($Conf->round_list()) > 1 || $rev_roundtag)
+        echo "<br />", Ht::hidden("rev_roundtag", $rev_roundtag),
+            'Current review round: &nbsp;', htmlspecialchars($rev_roundtag ? : "(no name)"),
+            ' &nbsp;<span class="barsep">|</span>&nbsp; <a href="', hoturl("settings", "group=reviews#rounds"), '">Configure rounds</a>';
+
+    echo "</div><div class='papv' style='padding-left:0'>";
 
     $colorizer = new Tagger;
     $pctexts = array();
     foreach (pcMembers() as $pc) {
-        $p = $pcx[$pc->cid];
+        $p = $pcx[$pc->contactId];
         if (!$pc->allow_review_assignment_ignore_conflict($prow))
             continue;
 
@@ -625,11 +608,11 @@ if ($Me->allowAdminister($prow))
 echo '</div></div><div class="revcard_body">';
 echo "<div class='f-i'><div class='f-ix'>
   <div class='f-c'>Name</div>
-  <div class='f-e'><input class='textlite' type='text' name='name' value=\"", htmlspecialchars(defval($_REQUEST, "name", "")), "\" size='32' tabindex='1' /></div>
+  <div class='f-e'><input type='text' name='name' value=\"", htmlspecialchars(defval($_REQUEST, "name", "")), "\" size='32' tabindex='1' /></div>
 </div><div class='f-ix'>
   <div class='f-c", (isset($Error["email"]) ? " error" : ""), "'>Email</div>
-  <div class='f-e'><input class='textlite' type='text' name='email' value=\"", htmlspecialchars(defval($_REQUEST, "email", "")), "\" size='28' tabindex='1' /></div>
-</div><div class='clear'></div></div>\n\n";
+  <div class='f-e'><input type='text' name='email' value=\"", htmlspecialchars(defval($_REQUEST, "email", "")), "\" size='28' tabindex='1' /></div>
+</div><hr class=\"c\" /></div>\n\n";
 
 // reason area
 $null_mailer = new Mailer(null, null);
@@ -638,7 +621,7 @@ if (strpos($reqbody["body"], "%REASON%") !== false) {
     echo "<div class='f-i'>
   <div class='f-c'>Note to reviewer <span class='f-cx'>(optional)</span></div>
   <div class='f-e'><textarea class='papertext' name='reason' rows='2' cols='60' tabindex='1'>", htmlspecialchars(defval($_REQUEST, "reason", "")), "</textarea></div>
-<div class='clear'></div></div>\n\n";
+<hr class=\"c\" /></div>\n\n";
 }
 
 echo "<div class='f-i'>\n",

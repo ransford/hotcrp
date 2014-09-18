@@ -18,7 +18,7 @@ function confHeader() {
         $title = "Paper #$prow->paperId";
     else
         $title = "Paper Comments";
-    $Conf->header($title, "comment", actionBar("c", $prow), false);
+    $Conf->header($title, "comment", actionBar(null, $prow), false);
 }
 
 function errorMsgExit($msg) {
@@ -45,7 +45,7 @@ function loadRows() {
             || ($cid == "response" && ($row->commentType & COMMENTTYPE_RESPONSE)))
             $crow = $row;
     }
-    if ($cid != "xxx" && !$crow && $cid != "response" && $cid != "new")
+    if ($cid != "xxx" && !$crow && $cid != "response" && $cid != "new" && $cid != "newresponse")
         errorMsgExit("That comment does not exist.");
     if (isset($Error["paperId"]) && $Error["paperId"] != $prow->paperId)
         $Error = array();
@@ -70,66 +70,86 @@ function saveComment($text, $is_response) {
     $next_crow = CommentSave::save($req, $prow, $crow, $Me, $is_response);
     $what = ($is_response ? "Response" : "Comment");
 
-    if ($next_crow === false) {
-        if ($is_response) {
-            $q = ($Conf->sversion >= 53 ? "(commentType&" . COMMENTTYPE_RESPONSE . ")!=0" : "forAuthors>1");
-            $result = $Conf->qe("select commentId from PaperComment where paperId=$prow->paperId and $q");
-            if (($next_crow = edb_orow($result)))
-                $Conf->errorMsg("Edit this response, which has already been entered.");
-        }
-    } else if ($next_crow && $is_response && ($next_crow->commentType & COMMENTTYPE_DRAFT)) {
+    $confirm = false;
+    if ($next_crow === false && $is_response) {
+        $crows = $Conf->comment_rows($Conf->comment_query("paperId=$prow->paperId and (commentType&" . COMMENTTYPE_RESPONSE . ")!=0"), $Me);
+        reset($crows);
+        $cur_response = @current($crows);
+        if ($cur_response && $cur_response->comment == $text)
+            $next_crow = $cur_response;
+        else
+            $confirm = '<div class="xmerror">A response was entered concurrently by another user. Reload to see it.</div>';
+    }
+    if ($next_crow === false)
+        /* nada */;
+    else if ($next_crow && $is_response && ($next_crow->commentType & COMMENTTYPE_DRAFT)) {
         $deadline = $Conf->printableTimeSetting("resp_done");
         if ($deadline != "N/A")
-            $extratext = "  You have until $deadline to submit the response.";
+            $extratext = " You have until $deadline to submit the response.";
         else
             $extratext = "";
-        $Conf->save_session_array("comment_msgs", $next_crow->commentId,
-                                  "<div class='xwarning'>$what saved. <strong>This draft response will not be shown to reviewers.</strong>$extratext</div>");
+        $confirm = "<div class='xwarning'>$what saved. <strong>This draft response will not be shown to reviewers.</strong>$extratext</div>";
     } else if ($next_crow)
-        $Conf->save_session_array("comment_msgs", $next_crow->commentId,
-                                  "<div class='xconfirm'>$what submitted.</div>");
+        $confirm = "<div class='xconfirm'>$what submitted.</div>";
+    else if (@$_REQUEST["ajax"])
+        $confirm = "<div class='xconfirm'>$what deleted.</div>";
     else
         $Conf->confirmMsg("$what deleted.");
 
-    $x = array("p" => $prow->paperId, "c" => null, "noedit" => null, "ls" => @$_REQUEST["ls"]);
-    if ($next_crow) {
-        $x["anchor"] = "comment$next_crow->commentId";
+    if (@$_REQUEST["ajax"]) {
+        $cv = new CommentView;
+        $j = array("ok" => $next_crow !== false);
+        if (@$next_crow) {
+            $cv = new CommentView;
+            $j["cmt"] = $cv->json($prow, $next_crow);
+        }
+        if ($confirm)
+            $j["msg"] = $confirm;
+        $Conf->ajaxExit($j);
+    } else {
+        if ($confirm && $next_crow)
+            $Conf->save_session_array("comment_msgs", $next_crow->commentId, $confirm);
+        $x = array("p" => $prow->paperId, "c" => null, "noedit" => null, "ls" => @$_REQUEST["ls"]);
+        if ($next_crow)
+            $x["anchor"] = "comment$next_crow->commentId";
         go(hoturl("paper", $x));
-    } else
-        go(hoturl("paper", $x));
+    }
 }
 
 if (!check_post())
     /* do nothing */;
-else if ((isset($_REQUEST["submitcomment"]) || isset($_REQUEST["submitresponse"])
-          || isset($_REQUEST["savedraftresponse"]))
-         && defval($_REQUEST, "response")) {
+else if ((@$_REQUEST["submitcomment"] || @$_REQUEST["submitresponse"] || @$_REQUEST["savedraftresponse"])
+         && @$_REQUEST["response"]) {
     $text = @rtrim($_REQUEST["comment"]);
-    if (!$Me->canRespond($prow, $crow, $whyNot, true)) {
+    if (!$Me->canRespond($prow, $crow, $whyNot, true))
         $Conf->errorMsg(whyNotText($whyNot, "respond to reviews for"));
-        $useRequest = true;
-    } else if ($text === "" && !$crow) {
+    else if ($text === "" && !$crow)
         $Conf->errorMsg("Enter a comment.");
-        $useRequest = true;
-    } else
+    else
         saveComment($text, true);
-} else if (isset($_REQUEST["submitcomment"])) {
+    if (@$_REQUEST["ajax"])
+        $Conf->ajaxExit(array("ok" => false));
+    $useRequest = true;
+} else if (@$_REQUEST["submitcomment"]) {
     $text = @rtrim($_REQUEST["comment"]);
-    if (!$Me->canSubmitComment($prow, $crow, $whyNot)) {
+    if (!$Me->canSubmitComment($prow, $crow, $whyNot))
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
-        $useRequest = true;
-    } else if ($text === "" && !$crow) {
+    else if ($text === "" && !$crow)
         $Conf->errorMsg("Enter a comment.");
-        $useRequest = true;
-    } else
+    else
         saveComment($text, false);
-} else if (isset($_REQUEST["deletecomment"]) && $crow) {
-    if (!$Me->canSubmitComment($prow, $crow, $whyNot)) {
+    if (@$_REQUEST["ajax"])
+        $Conf->ajaxExit(array("ok" => false));
+    $useRequest = true;
+} else if ((@$_REQUEST["deletecomment"] || @$_REQUEST["deleteresponse"]) && $crow) {
+    if (!$Me->canSubmitComment($prow, $crow, $whyNot))
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
-        $useRequest = true;
-    } else
+    else
         saveComment("", ($crow->commentType & COMMENTTYPE_RESPONSE) != 0);
-} else if (isset($_REQUEST["cancel"]) && $crow)
+    if (@$_REQUEST["ajax"])
+        $Conf->ajaxExit(array("ok" => false));
+    $useRequest = true;
+} else if (@$_REQUEST["cancel"] && $crow)
     $_REQUEST["noedit"] = 1;
 
 

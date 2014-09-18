@@ -22,8 +22,6 @@ define("CONFLICT_CHAIRMARK", 8);
 define("CONFLICT_AUTHOR", 9);
 define("CONFLICT_CONTACTAUTHOR", 10);
 
-define("TAG_MAXLEN", 40);
-
 // User explicitly set notification preference (only in PaperWatch.watch)
 define("WATCHSHIFT_EXPLICIT", 0);
 // Notify if author, reviewer, commenter
@@ -83,6 +81,7 @@ define("COMMENTTYPE_VISIBILITY", 0xFFF0000);
 
 define("TAG_REGEX", '~?~?[a-zA-Z!@*_:.][-a-zA-Z0-9!@*_:.\/]*');
 define("TAG_REGEX_OPTVALUE", '~?~?[a-zA-Z!@*_:.][-a-zA-Z0-9!@*_:.\/]*([#=](-\d)?\d*)?');
+define("TAG_MAXLEN", 40);
 
 define("CAPTYPE_RESETPASSWORD", 1);
 define("CAPTYPE_CHANGEEMAIL", 2);
@@ -110,7 +109,6 @@ $allowedSessionVars = array("foldpapera", "foldpaperp", "foldpaperb",
 // set $ConfSitePATH (path to conference site), $ConfSiteBase, and $ConfSiteSuffix
 function set_path_variables() {
     global $ConfSitePATH, $ConfSiteBase, $ConfSiteSuffix;
-
     if (!@$ConfSitePATH) {
         $ConfSitePATH = substr(__FILE__, 0, strrpos(__FILE__, "/"));
         while ($ConfSitePATH !== "" && !file_exists("$ConfSitePATH/src/init.php"))
@@ -118,7 +116,6 @@ function set_path_variables() {
         if ($ConfSitePATH === "")
             $ConfSitePATH = "/var/www/html";
     }
-
     require_once("$ConfSitePATH/lib/navigation.php");
     Navigation::analyze();
     if (@$ConfSiteBase === null)
@@ -130,16 +127,11 @@ set_path_variables();
 
 
 // Load code
-require_once("$ConfSitePATH/lib/base.php");
-require_once("$ConfSitePATH/lib/redirect.php");
-require_once("$ConfSitePATH/src/helpers.php");
-require_once("$ConfSitePATH/src/conference.php");
-require_once("$ConfSitePATH/src/contact.php");
-
 function __autoload($class_name) {
     global $ConfSitePATH, $ConfAutoloads;
     if (!@$ConfAutoloads)
         $ConfAutoloads = array("AssignmentSet" => "src/assigners.php",
+                               "CapabilityManager" => "src/capability.php",
                                "CheckFormat" => "src/checkformat.php",
                                "CleanHTML" => "lib/cleanhtml.php",
                                "Column" => "lib/column.php",
@@ -151,6 +143,7 @@ function __autoload($class_name) {
                                "CsvParser" => "lib/csv.php",
                                "DocumentHelper" => "lib/documenthelper.php",
                                "Formula" => "src/formula.php",
+                               "FormulaPaperColumn" => "src/papercolumn.php",
                                "HotCRPDocument" => "src/hotcrpdocument.php",
                                "Ht" => "lib/ht.php",
                                "LoginHelper" => "lib/login.php",
@@ -158,6 +151,7 @@ function __autoload($class_name) {
                                "MeetingTracker" => "src/meetingtracker.php",
                                "Message" => "lib/message.php",
                                "Mimetype" => "lib/mimetype.php",
+                               "Multiconference" => "src/multiconference.php",
                                "PaperActions" => "src/paperactions.php",
                                "PaperColumn" => "src/papercolumn.php",
                                "PaperInfo" => "src/paperinfo.php",
@@ -166,9 +160,11 @@ function __autoload($class_name) {
                                "PaperRank" => "src/rank.php",
                                "PaperSearch" => "src/papersearch.php",
                                "PaperStatus" => "src/paperstatus.php",
+                               "PaperTable" => "src/papertable.php",
                                "Qobject" => "lib/qobject.php",
                                "ReviewForm" => "src/review.php",
                                "S3Document" => "lib/s3document.php",
+                               "SearchActions" => "src/searchactions.php",
                                "Tagger" => "lib/tagger.php",
                                "Text" => "lib/text.php",
                                "UnicodeHelper" => "lib/unicodehelper.php",
@@ -180,38 +176,62 @@ function __autoload($class_name) {
         require_once("$ConfSitePATH/$f");
 }
 
+require_once("$ConfSitePATH/lib/base.php");
+require_once("$ConfSitePATH/lib/redirect.php");
+require_once("$ConfSitePATH/lib/dbl.php");
+require_once("$ConfSitePATH/src/helpers.php");
+require_once("$ConfSitePATH/src/conference.php");
+require_once("$ConfSitePATH/src/contact.php");
+
 
 // Set locale to C (so that, e.g., strtolower() on UTF-8 data doesn't explode)
 setlocale(LC_COLLATE, "C");
 setlocale(LC_CTYPE, "C");
 
 
-// Set up conference options
-function read_included_options($files) {
-    global $Opt, $ConfSitePATH;
+// Set up conference options (also used in mailer.php)
+function expand_includes($sitedir, $files, $expansions = array()) {
+    global $Opt;
     if (is_string($files))
         $files = array($files);
     $confname = @$Opt["confid"] ? : @$Opt["dbName"];
+    $results = array();
     $cwd = null;
     foreach ($files as $f) {
-        $f = preg_replace(',\$\{conf(?:id|name)\}|\$conf(?:id|name)\b,', $confname, $f);
-        if (preg_match(',[\[\]\*\?],', $f)) {
-            if ($cwd === null) {
-                $cwd = getcwd();
-                if (!chdir($ConfSitePATH)) {
-                    $Opt["missing"][] = $f;
+        if (strpos($f, '$') !== false) {
+            $f = preg_replace(',\$\{conf(?:id|name)\}|\$conf(?:id|name)\b,', $confname, $f);
+            foreach ($expansions as $k => $v)
+                if ($v !== false && $v !== null)
+                    $f = preg_replace(',\$\{' . $k . '\}|\$' . $k . '\b,', $v, $f);
+                else if (preg_match(',\$\{' . $k . '\}|\$' . $k . '\b,', $f)) {
+                    $f = false;
                     break;
                 }
-            }
-            $flist = glob($f, GLOB_BRACE);
-        } else
-            $flist = array($f);
-        foreach ($flist as $f) {
-            $f = ($f[0] == "/" ? $f : "$ConfSitePATH/$f");
-            if (!@include $f)
-                $Opt["missing"][] = $f;
         }
+        if ($f === false)
+            /* skip */;
+        else if (preg_match(',[\[\]\*\?],', $f)) {
+            if ($cwd === null) {
+                $cwd = getcwd();
+                chdir($sitedir);
+            }
+            foreach (glob($f, GLOB_BRACE) as $x)
+                $results[] = $x;
+        } else
+            $results[] = $f;
     }
+    foreach ($results as &$f)
+        $f = ($f[0] == "/" ? $f : "$sitedir/$f");
+    if ($cwd)
+        chdir($cwd);
+    return $results;
+}
+
+function read_included_options($sitedir, $files) {
+    global $Opt;
+    foreach (expand_includes($sitedir, $files) as $f)
+        if (!@include $f)
+            $Opt["missing"][] = $f;
 }
 
 global $Opt, $OptOverride;
@@ -220,7 +240,6 @@ if (!@$Opt)
 if (!@$OptOverride)
     $OptOverride = array();
 if (!@$Opt["loaded"]) {
-    // see also `cacheable.php`
     if (defined("HOTCRP_OPTIONS")) {
         if ((@include HOTCRP_OPTIONS) !== false)
             $Opt["loaded"] = true;
@@ -228,17 +247,13 @@ if (!@$Opt["loaded"]) {
                || (@include "$ConfSitePATH/conf/options.inc") !== false
                || (@include "$ConfSitePATH/Code/options.inc") !== false)
         $Opt["loaded"] = true;
-    if (@$Opt["multiconference"]) {
-        require_once("$ConfSitePATH/src/multiconference.php");
-        multiconference_init();
-    }
+    if (@$Opt["multiconference"])
+        Multiconference::init();
     if (@$Opt["include"])
-        read_included_options($Opt["include"]);
+        read_included_options($ConfSitePATH, $Opt["include"]);
 }
-if (!@$Opt["loaded"] || @$Opt["missing"]) {
-    require_once("$ConfSitePATH/src/multiconference.php");
-    multiconference_fail(false);
-}
+if (!@$Opt["loaded"] || @$Opt["missing"])
+    Multiconference::fail_bad_options();
 
 
 // Allow lots of memory
@@ -248,8 +263,6 @@ ini_set("memory_limit", defval($Opt, "memoryLimit", "128M"));
 // Create the conference
 global $Conf;
 if (!@$Conf)
-    $Conf = new Conference(Conference::make_dsn($Opt));
-if (!$Conf->dblink) {
-    require_once("$ConfSitePATH/src/multiconference.php");
-    multiconference_fail(true);
-}
+    $Conf = new Conference(Dbl::make_dsn($Opt));
+if (!$Conf->dblink)
+    Multiconference::fail_bad_database();

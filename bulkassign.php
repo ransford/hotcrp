@@ -6,9 +6,11 @@
 require_once("src/initweb.php");
 require_once("src/papersearch.php");
 require_once("src/assigners.php");
-if ($Me->is_empty() || !$Me->privChair)
+if (!$Me->privChair)
     $Me->escape();
-$nullMailer = new Mailer(null, null, $Me);
+$nullMailer = new Mailer(null, null, array("requester_contact" => $Me,
+                                           "other_contact" => $Me /* backwards compat */,
+                                           "reason" => ""));
 $nullMailer->width = 10000000;
 $Error = $Warning = array();
 
@@ -16,6 +18,9 @@ $Error = $Warning = array();
 function assignment_defaults() {
     $defaults = array("action" => @$_REQUEST["default_action"],
                       "round" => @$_REQUEST["rev_roundtag"]);
+    if (@$_REQUEST["requestreview_notify"] && @$_REQUEST["requestreview_body"])
+        $defaults["extrev_notify"] = array("subject" => @$_REQUEST["requestreview_subject"],
+                                           "body" => @$_REQUEST["requestreview_body"]);
     if (trim($defaults["round"]) == "(None)")
         $defaults["round"] = null;
     return $defaults;
@@ -29,7 +34,7 @@ if (isset($_REQUEST["saveassignment"]) && check_post()) {
         $assignset = new AssignmentSet($Me, false);
         $assignset->parse($_REQUEST["file"], @$_REQUEST["filename"],
                           assignment_defaults());
-        if ($assignset->execute($Now))
+        if ($assignset->execute())
             redirectSelf();
     }
 }
@@ -88,6 +93,9 @@ if (isset($_REQUEST["upload"]) && fileUploaded($_FILES["uploadfile"])
                 Ht::hidden("rev_roundtag", $defaults["round"]),
                 Ht::hidden("file", $text),
                 Ht::hidden("filename", $_FILES["uploadfile"]["name"]),
+                Ht::hidden("requestreview_notify", @$_REQUEST["requestreview_notify"]),
+                Ht::hidden("requestreview_subject", @$_REQUEST["requestreview_subject"]),
+                Ht::hidden("requestreview_body", @$_REQUEST["requestreview_body"]),
                 '</div></div></form>', "\n";
             $Conf->footer();
             exit;
@@ -98,13 +106,13 @@ if (isset($_REQUEST["upload"]) && fileUploaded($_FILES["uploadfile"])
 
 echo "<h2 style='margin-top:1em'>Upload assignments</h2>\n\n";
 
-echo Ht::form(hoturl_post("bulkassign", "upload=1")), '<div class="inform">';
+echo Ht::form_div(hoturl_post("bulkassign", "upload=1"));
 
 // Upload
 echo '<input type="file" name="uploadfile" accept="text/plain,text/csv" size="30" />',
     '<div style="margin:0.5em 0">';
 
-echo 'Default action:&nbsp; assign&nbsp; ',
+echo 'By default, assign&nbsp; ',
     Ht::select("default_action", array("primary" => "primary reviews",
                                        "secondary" => "secondary reviews",
                                        "pcreview" => "optional PC reviews",
@@ -113,7 +121,8 @@ echo 'Default action:&nbsp; assign&nbsp; ',
                                        "lead" => "discussion leads",
                                        "shepherd" => "shepherds",
                                        "tag" => "add tags",
-                                       "settag" => "replace tags"),
+                                       "settag" => "replace tags",
+                                       "preference" => "reviewer preferences"),
                defval($_REQUEST, "default_action", "primary"),
                array("id" => "tsel", "onchange" => "fold(\"email\",this.value!=\"review\")")),
     '<div class="g"></div>', "\n";
@@ -122,26 +131,28 @@ if (!isset($_REQUEST["rev_roundtag"]))
     $rev_roundtag = $Conf->setting_data("rev_roundtag");
 else if (($rev_roundtag = $_REQUEST["rev_roundtag"]) == "(None)")
     $rev_roundtag = "";
-if (isset($_REQUEST["email_requestreview"]))
-    $t = $_REQUEST["email_requestreview"];
-else {
-    $t = $nullMailer->expandTemplate("requestreview");
-    $t = $t["body"];
-}
+$requestreview_template = $nullMailer->expandTemplate("requestreview");
+echo Ht::hidden("requestreview_subject", $requestreview_template["subject"]);
+if (isset($_REQUEST["requestreview_body"]))
+    $t = $_REQUEST["requestreview_body"];
+else
+    $t = $requestreview_template["body"];
 echo "<div id='foldemail' class='foldo'><table class='fx'>
-<tr><td>", Ht::checkbox("email", 1, true), "&nbsp;</td>
+<tr><td>", Ht::checkbox("requestreview_notify", 1, true), "&nbsp;</td>
 <td>", Ht::label("Send email to external reviewers:"), "</td></tr>
-<tr><td></td><td><textarea class='tt' name='email_requestreview' cols='80' rows='20'>", htmlspecialchars($t), "</textarea></td></tr></table>
-<div";
-if (isset($Error["rev_roundtag"]))
-    echo ' class="error"';
-echo ">Default review round for new assignments: &nbsp;",
-    "<input id='rev_roundtag' class='textlite temptextoff' type='text' size='15' name='rev_roundtag' value=\"",
-    htmlspecialchars($rev_roundtag ? $rev_roundtag : "(None)"),
-    "\" />",
-    " &nbsp;<a class='hint' href='", hoturl("help", "t=revround"), "'>What is this?</a></div></div>",
-    Ht::submit("Upload"),
-    "</div></div></form>
+<tr><td></td><td>",
+    Ht::textarea("requestreview_body", $t, array("class" => "tt", "cols" => 80, "rows" => 20)),
+    "</td></tr></table></div>\n";
+if (count($Conf->round_list()) > 1 || $rev_roundtag)
+    echo Ht::hidden("rev_roundtag", $rev_roundtag),
+        'Current review round: &nbsp;', htmlspecialchars($rev_roundtag ? : "(no name)"),
+        ' &nbsp;<span class="barsep">|</span>&nbsp; <a href="', hoturl("settings", "group=reviews#rounds"), '">Configure rounds</a>';
+
+echo '<div class="g"></div>', Ht::submit("Upload"), "</div>";
+
+echo '<div style="margin-top:1.5em"><a href="', hoturl_post("search", "t=s&q=&get=pcassignments&p=all"), '">Download current PC assignments</a></div>';
+
+echo "</div></form>
 
 <hr style='margin-top:1em' />
 
@@ -153,7 +164,7 @@ they are applied.</p>
 
 <p>A simple example:</p>
 
-<pre class='entryexample'>paper,action,email
+<pre class='entryexample'>paper,assignment,email
 1,primary,man@alice.org
 2,secondary,slugger@manny.com
 1,primary,slugger@manny.com</pre>
@@ -165,7 +176,7 @@ members, or if they have conflicts with their assigned papers.</p>
 
 <p>A more complex example:</p>
 
-<pre class='entryexample'>paper,action,email,round
+<pre class='entryexample'>paper,assignment,email,round
 all,clearreview,all,R2
 1,primary,man@alice.org,R2
 10,primary,slugger@manny.com,R2
@@ -182,7 +193,7 @@ file as a unit. If file makes no overall changes to the current
 state, the upload process does nothing. For instance, if a file
 removes an active assignment and then restores it, the assignment is left alone.</p>
 
-<p>Actions are:</p>
+<p>Assignment types are:</p>
 
 <dl>
 <dt><code>primary</code>, <code>secondary</code>, <code>pcreview</code></dt>
@@ -209,24 +220,27 @@ review into a PC review).</dd>
 <dt><code>lead</code></dt>
 <dd>Set the discussion lead. The <code>email</code>, <code>name</code>,
 and/or <code>user</code> columns locate the PC user. To clear the discussion lead,
-use email <code>none</code> or action <code>clearlead</code>.</dd>
+use email <code>none</code> or assignment type <code>clearlead</code>.</dd>
 
 <dt><code>shepherd</code></dt>
 <dd>Set the shepherd. The <code>email</code>, <code>name</code>,
 and/or <code>user</code> columns locate the PC user. To clear the shepherd,
-use email <code>none</code> or action <code>clearshepherd</code>.</dd>
+use email <code>none</code> or assignment type <code>clearshepherd</code>.</dd>
 
 <dt><code>conflict</code></dt>
 <dd>Mark a PC conflict. The <code>email</code>, <code>name</code>,
 and/or <code>user</code> columns locate the PC user. To clear a conflict,
-use action <code>clearconflict</code>.</dd>
+use assignment type <code>clearconflict</code>.</dd>
 
 <dt><code>tag</code></dt>
 <dd>Add a tag. The <code>tag</code> column names the tag and the optional
 <code>value</code> column sets the tag value.
-To clear a tag, use action <code>cleartag</code> or value <code>none</code>.</dd>
+To clear a tag, use assignment type <code>cleartag</code> or value <code>none</code>.</dd>
+
+<dt><code>preference</code></dt>
+<dd>Set reviewer preference and expertise. The <code>preference</code> column
+gives the preference value.</dd>
 </dl>\n";
 
-$Conf->footerScript("mktemptext('rev_roundtag','(None)')");
-$Conf->footerScript("fold('email',\$\$('tsel').value!=" . REVIEW_EXTERNAL . ")");
+$Conf->footerScript("fold('email',\$\$('tsel').value!='review')");
 $Conf->footer();

@@ -348,8 +348,7 @@ class ReviewForm {
     }
 
     private function get_deprecated($table, $element) {
-        $trace = debug_backtrace();
-        trigger_error($trace[1]["file"] . ":" . $trace[1]["line"] . ": ReviewForm->$table deprecated", E_USER_NOTICE);
+        trigger_error(caller_landmark(2) . ": ReviewForm->$table deprecated", E_USER_NOTICE);
         $x = array();
         foreach ($this->fmap as $f)
             $x[$f->id] = $f->$element;
@@ -368,14 +367,12 @@ class ReviewForm {
         else if ($name == "shortName")
             $x = $this->get_deprecated($name, "name");
         else if ($name == "fieldOrder") {
-            $trace = debug_backtrace();
-            trigger_error($trace[0]["file"] . ":" . $trace[0]["line"] . ": ReviewForm->$name deprecated", E_USER_NOTICE);
+            trigger_error(caller_landmark() . ": ReviewForm->$name deprecated", E_USER_NOTICE);
             $x = array();
             foreach ($this->forder as $f)
                 $x[] = $f->id;
         } else if ($name == "reviewFields") {
-            $trace = debug_backtrace();
-            trigger_error($trace[0]["file"] . ":" . $trace[0]["line"] . ": ReviewForm->$name deprecated", E_USER_NOTICE);
+            trigger_error(caller_landmark() . ": ReviewForm->$name deprecated", E_USER_NOTICE);
             $x = array();
             foreach ($this->fmap as $f)
                 $x[$f->id] = $f->has_options ? ($f->option_letter ? $f->option_letter : 1) : 0;
@@ -443,65 +440,58 @@ class ReviewForm {
     static public function reviewArchiveFields() {
         global $Conf;
         $rf = self::get(0);
-        $fields = "reviewId, paperId, contactId, reviewType, requestedBy,
+        return "reviewId, paperId, contactId, reviewType, requestedBy,
                 reviewModified, reviewSubmitted, reviewNeedsSubmit, "
             . join(", ", array_keys($rf->fmap))
-            . ", reviewRound";
-        if ($Conf->sversion >= 37)
-            $fields .= ", reviewNotified";
-        if ($Conf->sversion >= 46)
-            $fields .= ", timeRequested, timeRequestNotified";
-        if ($Conf->sversion >= 49)
-            $fields .= ", reviewToken, reviewAuthorNotified";
-        return $fields;
+            . ", reviewRound, reviewNotified, timeRequested, timeRequestNotified,
+            reviewToken, reviewAuthorNotified";
     }
 
-    function webFormRows($contact, $prow, $rrow, $useRequest = false) {
+    private function webFormRows($contact, $prow, $rrow, $useRequest = false) {
         global $ReviewFormError, $Conf;
-        $x = "";
         $revViewScore = $contact->viewReviewFieldsScore($prow, $rrow);
         foreach ($this->forder as $field => $f) {
             if ($f->view_score <= $revViewScore)
                 continue;
+
             $fval = "";
             if ($useRequest && isset($_REQUEST[$field]))
                 $fval = $_REQUEST[$field];
             else if ($rrow)
                 $fval = $f->unparse_value($rrow->$field);
 
-            $n = $f->name_html;
-            $c = "<span class='revfn'>" . $n . "</span>";
-            if ($f->view_score < VIEWSCORE_REVIEWERONLY)
-                $c .= "<div class='revevis'>(secret)</div>";
-            else if ($f->view_score < VIEWSCORE_PC)
-                $c .= "<div class='revevis'>(shown only to chairs)</div>";
-            else if ($f->view_score < VIEWSCORE_AUTHOR)
-                $c .= "<div class='revevis'>(hidden from authors)</div>";
-
-            $x .= "<div class='revt";
+            echo '<div class="revt';
             if (isset($ReviewFormError[$field]))
-                $x .= " error";
-            $x .= "'>" . $c . "<div class='clear'></div></div>";
+                echo " error";
+            echo '"><span class="revfn">', $f->name_html, '</span>';
+            if ($f->view_score < VIEWSCORE_REVIEWERONLY)
+                echo '<div class="revevis">(secret)</div>';
+            else if ($f->view_score < VIEWSCORE_PC)
+                echo '<div class="revevis">(shown only to chairs)</div>';
+            else if ($f->view_score < VIEWSCORE_AUTHOR)
+                echo '<div class="revevis">(hidden from authors)</div>';
+            echo '<hr class="c" /></div>';
+
             if ($f->description)
-                $x .= "<div class='revhint'>" . $f->description . "</div>\n";
-            $x .= "<div class='revev'>";
+                echo '<div class="revhint">', $f->description, "</div>";
+
+            echo '<div class="revev">';
             if ($f->has_options) {
-                $x .= "<select name='$field' onchange='hiliter(this)'>\n";
+                echo '<select name="', $field, '" onchange="hiliter(this)">';
                 if (!$f->parse_value($fval, true))
-                    $x .= "    <option value='0' selected='selected'>(Your choice here)</option>\n";
+                    echo '<option value="0" selected="selected">(Your choice here)</option>';
                 foreach ($f->options as $num => $what) {
-                    $x .= "    <option value='$num'";
+                    echo '<option value="', $num, '"';
                     if ($num == $fval)
-                        $x .= " selected='selected'";
-                    $x .= ">$num. " . htmlspecialchars($what) . "</option>\n";
+                        echo ' selected="selected"';
+                    echo ">$num. ", htmlspecialchars($what), "</option>";
                 }
-                $x .= "</select>";
+                echo "</select>";
             } else {
-                $x .= "<textarea name='$field' class='reviewtext' onchange='hiliter(this)' rows='" . $f->display_space . "' cols='60'>" . htmlspecialchars($fval) . "</textarea>";
+                echo '<textarea name="' . $field . '" class="reviewtext" onchange="hiliter(this)" rows="' . $f->display_space . '" cols="60">' . htmlspecialchars($fval) . '</textarea>';
             }
-            $x .= "</div>\n";
+            echo "</div>\n";
         }
-        return $x;
     }
 
     function tfError(&$tf, $isError, $text, $field = null) {
@@ -587,10 +577,10 @@ class ReviewForm {
         if ($prow->conflictType == 0
             && $minic->canViewReview($prow, $this->mailer_info["rrow"], false))
             Mailer::send($this->mailer_info["template"], $prow, $minic,
-                         null, $this->mailer_info);
+                         $this->mailer_info);
     }
 
-    function saveRequest($req, $rrow, $prow, $contact, &$tf = null) {
+    function save_review($req, $rrow, $prow, $contact, &$tf = null) {
         global $Conf, $Opt;
         $submit = defval($req, "ready", false) && !defval($req, "unready", false)
             && (!$rrow || !$rrow->reviewSubmitted);
@@ -677,7 +667,7 @@ class ReviewForm {
                     $q[] = $notify = "reviewNotified=" . $now;
                 if ((!$rrow || !$rrow->reviewAuthorNotified
                      || $rrow->reviewAuthorNotified + 10800 < $now)
-                    && $Conf->sversion >= 49 && $diff_view_score >= VIEWSCORE_AUTHOR)
+                    && $diff_view_score >= VIEWSCORE_AUTHOR)
                     $q[] = $notify_author = "reviewAuthorNotified=" . $now;
             }
         }
@@ -688,8 +678,8 @@ class ReviewForm {
             $reviewId = $rrow->reviewId;
             $contactId = $rrow->contactId;
         } else {
-            $result = $Conf->qe("insert into PaperReview set paperId=$prow->paperId, contactId=$contact->contactId, reviewType=" . REVIEW_PC . ", requestedBy=$contact->contactId, " . join(", ", $q));
-            $reviewId = $Conf->lastInsertId();
+            $result = Dbl::real_qe("insert into PaperReview set paperId=$prow->paperId, contactId=$contact->contactId, reviewType=" . REVIEW_PC . ", requestedBy=$contact->contactId, " . join(", ", $q));
+            $reviewId = $result ? $result->insert_id : null;
             $contactId = $contact->contactId;
         }
 
@@ -739,19 +729,22 @@ class ReviewForm {
 
             // construct mail
             $rest = array("template" => $tmpl, "rrow" => $fake_rrow,
+                          "reviewer_contact" => $submitter,
                           "reviewNumber" => $prow->paperId . unparseReviewOrdinal($notify_rrow->reviewOrdinal));
             if ($Conf->timeEmailChairAboutReview())
-                Mailer::send_manager($tmpl, $prow, $submitter, $rest);
+                Mailer::send_manager($tmpl, $prow, $rest);
             if ($diff_view_score >= VIEWSCORE_PC) {
                 $this->mailer_info = $rest;
                 genericWatch($prow, WATCHTYPE_REVIEW, array($this, "review_watch_callback"), $contact);
                 unset($this->mailer_info);
             }
-            if ($Conf->timeEmailAuthorsAboutReview() && $notify_author) {
+            if ($Conf->timeAuthorViewReviews() && $notify_author) {
                 $rest["infoMsg"] = "since a review was updated during the response period.";
-                if ($Conf->is_review_blind($fake_rrow))
+                if ($Conf->is_review_blind($fake_rrow)) {
                     $rest["infoMsg"] .= " Reviewer anonymity was preserved.";
-                Mailer::sendContactAuthors($tmpl, $prow, $submitter, $rest);
+                    unset($rest["reviewer_contact"]);
+                }
+                Mailer::send_contacts($tmpl, $prow, $rest);
             }
         }
 
@@ -1245,7 +1238,7 @@ $blind\n";
                 $x .= "<div class='rvr'>";
             else
                 $x .= "<div class='rvb'>";
-            $x .= "<div class='rv rv_$field'><div class='revt'>" . $c . "<div class='clear'></div>"
+            $x .= '<div class="rv rv_' . $field . '"><div class="revt">' . $c . '<hr class="c" />'
                 . '</div><div class="revv">';
             if ($f->has_options) {
                 if (!$fval || !isset($f->options[$fval]))
@@ -1260,7 +1253,7 @@ $blind\n";
                 $x .= '<div class="revtext">' . link_urls(htmlspecialchars($fval)) . '</div>';
             $x .= "</div></div></div>";
             if ($disp & self::WEB_RIGHT)
-                $x .= "<div class='clear'></div>";
+                $x .= '<hr class="c" />';
             if (!($disp & self::WEB_LEFT))
                 $x .= "</div>\n";
         }
@@ -1339,7 +1332,8 @@ $blind\n";
             }
             if ($rrow->contactId != $Me->contactId) {
                 $ratinglink = hoturl_post("review", "r=$reviewOrdinal" . (isset($_REQUEST["reviewId"]) ? "" : "&amp;allr=1"));
-                echo $ratesep, "<form id='ratingform_$reviewOrdinal' action='$ratinglink' method='post' enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>",
+                echo $ratesep,
+                    Ht::form_div($ratinglink, array("id" => "ratingform_$reviewOrdinal", "divclass" => "inline")),
                     "How helpful is this review? &nbsp;",
                     Ht::select("rating", self::$rating_types, ($rrow->myRating === null ? "n" : $rrow->myRating)),
                     " ", Ht::submit("Save", array("class" => "fx7")),
@@ -1356,7 +1350,7 @@ $blind\n";
         if (defval($options, "editmessage"))
             echo "<div class='hint'>", defval($options, "editmessage"), "</div>\n";
 
-        echo "<div class='clear'></div></div><div class=\"revcard_body\">",
+        echo '<hr class="c" /></div><div class="revcard_body">',
             $this->webDisplayRows($rrow, $Me->viewReviewFieldsScore($prow, $rrow)),
             "</div></div>\n\n";
     }
@@ -1375,8 +1369,7 @@ $blind\n";
             // Also see $_REQUEST["refuse"] case in review.php.
             $Conf->footerHtml("<div id='popup_ref' class='popupc'>
   <p style='margin:0 0 0.3em'>Select “Decline review” to decline this review. Thank you for keeping us informed.</p>
-  <form method='post' action=\"$reviewPostLink\" enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>"
-    . Ht::hidden("refuse", "refuse")
+  " . Ht::form_div($reviewPostLink) . Ht::hidden("refuse", "refuse")
     . "<textarea id='refusereviewreason' class='temptext' name='reason' rows='3' cols='40'>Optional explanation</textarea>
     <div class='popup_actions'>"
     . Ht::js_button("Cancel", "popup(null,'ref',1)")
@@ -1387,25 +1380,32 @@ $blind\n";
         }
 
         $submitted = $rrow && $rrow->reviewSubmitted;
-        if (!$submitted) {
-            $buttons[] = Ht::submit("submit", "Submit review", array("class" => "bb"));
+        if (!$Conf->time_review($rrow, $Me->actPC($prow, true), true)) {
+            $whyNot = array("deadline" => ($rrow && $rrow->reviewType < REVIEW_PC ? "extrev_hard" : "pcrev_hard"));
+            $override_text = whyNotText($whyNot, "review");
+            if (!$submitted) {
+                $buttons[] = array(Ht::js_button("Submit review", "override_deadlines(this)", array("class" => "bb", "hotoverridetext" => $override_text, "hotoverridesubmit" => "submitreview")), "(admin only)");
+                $buttons[] = array(Ht::js_button("Save as draft", "override_deadlines(this)", array("hotoverridetext" => $override_text, "hotoverridesubmit" => "savedraft")), "(admin only)");
+            } else
+                $buttons[] = array(Ht::js_button("Save changes", "override_deadlines(this)", array("class" => "bb", "hotoverridetext" => $override_text, "hotoverridesubmit" => "submitreview")), "(admin only)");
+        } else if (!$submitted) {
+            $buttons[] = Ht::submit("submitreview", "Submit review", array("class" => "bb"));
             $buttons[] = Ht::submit("savedraft", "Save as draft");
         } else
-            $buttons[] = Ht::submit("submit", "Save changes", array("class" => "bb"));
+            $buttons[] = Ht::submit("submitreview", "Save changes", array("class" => "bb"));
 
         if ($rrow && $type == "bottom" && $Me->allowAdminister($prow)) {
             $buttons[] = "";
             if ($submitted)
-                $buttons[] = array(Ht::submit("unsubmit", "Unsubmit review"), "(admin only)");
+                $buttons[] = array(Ht::submit("unsubmitreview", "Unsubmit review"), "(admin only)");
             $buttons[] = array(Ht::js_button("Delete review", "popup(this,'d',0)"), "(admin only)");
             $Conf->footerHtml("<div id='popup_d' class='popupc'>
   <p>Be careful: This will permanently delete all information about this
   review assignment from the database and <strong>cannot be
   undone</strong>.</p>
-  <form method='post' action=\"$reviewPostLink\" enctype='multipart/form-data' accept-charset='UTF-8'>
-    <div class='popup_actions'>"
+  " . Ht::form_div($reviewPostLink, array("divclass" => "popup_actions"))
     . Ht::js_button("Cancel", "popup(null,'d',1)") . " &nbsp;"
-    . Ht::submit("delete", "Delete review", array("class" => "bb"))
+    . Ht::submit("deletereview", "Delete review", array("class" => "bb"))
     . "</div></form></div>");
         }
 
@@ -1426,7 +1426,8 @@ $blind\n";
         $admin = $Me->allowAdminister($prow);
 
         if ($editmode) {
-            echo Ht::form($reviewPostLink), '<div class="aahc">',
+            echo Ht::form($reviewPostLink, array("class" => "revcard")),
+                '<div class="aahc">',
                 Ht::hidden_default_submit("default", "");
             if ($rrow)
                 echo Ht::hidden("version", defval($rrow, "reviewEditVersion", 0) + 1);
@@ -1511,7 +1512,7 @@ $blind\n";
             echo "<div class='hint'>You didn’t write this review, but as an administrator you can still make changes.</div>\n";
 
         // download?
-        echo '<div class="clear"></div>';
+        echo '<hr class="c" />';
         echo "<table class='revoff'><tr>
       <td><span class='revfn'>Offline reviewing</span></td>
       <td>Upload form: &nbsp; <input type='file' name='uploadedFile' accept='text/plain' size='30' />
@@ -1530,34 +1531,32 @@ $blind\n";
         echo '<div class="revcard_body">';
         if ($Me->timeReview($prow, $rrow) || $admin) {
             $buttons = $this->_review_buttons($prow, $rrow, "top", $reviewPostLink);
-            echo Ht::actions($buttons, array("style" => "margin-top:0"));
+            echo Ht::actions($buttons, array("class" => "aab", "style" => "margin-top:0"));
         }
 
         // blind?
         if ($Conf->review_blindness() == Conference::BLIND_OPTIONAL) {
-            echo "<div class='revt'><span class='revfn'>",
+            echo '<div class="revt"><span class="revfn">',
                 Ht::checkbox_h("blind", 1, ($useRequest ? defval($_REQUEST, 'blind') : (!$rrow || $rrow->reviewBlind))),
                 "&nbsp;", Ht::label("Anonymous review"),
-                "</span><div class='clear'></div></div>\n",
-                "<div class='revhint'>", htmlspecialchars($Opt["shortName"]), " allows either anonymous or open review.  Check this box to submit your review anonymously (the authors won&rsquo;t know who wrote the review).</div>\n",
-                "<div class='g'></div>\n";
+                "</span><hr class=\"c\" /></div>\n",
+                '<div class="revhint">', htmlspecialchars($Opt["shortName"]), " allows either anonymous or open review.  Check this box to submit your review anonymously (the authors won’t know who wrote the review).</div>\n",
+                '<div class="g"></div>', "\n";
         }
 
         // form body
-        echo $this->webFormRows($Me, $prow, $rrow, $useRequest);
+        $this->webFormRows($Me, $prow, $rrow, $useRequest);
 
         // review actions
         if ($Me->timeReview($prow, $rrow) || $admin) {
             $buttons = $this->_review_buttons($prow, $rrow, "bottom", $reviewPostLink);
-            echo Ht::actions($buttons);
-
-            if ($admin)
-                echo Ht::checkbox("override"), "&nbsp;", Ht::label("Override deadlines");
+            echo Ht::actions($buttons, array("class" => "aab", "style" => "margin-bottom:0"));
             if ($rrow && $rrow->reviewSubmitted && !$admin)
-                echo "<div class='hint'>Only administrators can remove or unsubmit the review at this point.</div>";
+                echo '<div class="hint">Only administrators can remove or unsubmit the review at this point.</div>';
         }
 
         echo "</div></div></div></form>\n\n";
+        Ht::stash_script('hiliter_children("form.revcard")', "form_revcard");
     }
 
     function maxNumericScore($field) {

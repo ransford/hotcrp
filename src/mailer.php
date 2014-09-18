@@ -46,9 +46,9 @@ class MailerState {
         else
             $m = "Keyword-like strings " . commajoin($a) . " were not recognized.";
         if ($ispaper)
-            $m .= "  (Paper-specific keywords like <code>%NUMBER%</code> weren’t recognized because this set of recipients is not linked to a paper collection.)";
+            $m .= " Paper-specific keywords like <code>%NUMBER%</code> weren’t recognized because this set of recipients is not linked to a paper collection.";
         if (isset($this->unexpanded["%AUTHORVIEWCAPABILITY%"]))
-            $m .= "  (Author view capabilities weren’t recognized because this mail isn’t meant for paper authors.)";
+            $m .= " Author view capabilities weren’t recognized because this mail isn’t meant for paper authors.";
         return $m;
     }
 
@@ -75,40 +75,42 @@ class Mailer {
                                        "replyto" => "Reply-To");
 
     private $row;
-    private $contact;
+    private $recipient;
     private $permissionContact;
     private $_tagger = null;
-    var $contacts;
-    var $hideSensitive;
-    var $hideReviews;
-    var $reason;
-    var $adminupdate;
-    var $notes;
-    var $rrow;
-    private $reviewNumber;
-    private $comment_row;
-    public $capability;
+    private $contacts = array();
+    private $sensitivity = null;
+    private $hideReviews = false;
+    private $reason = null;
+    private $adminupdate = null;
+    private $notes = null;
+    var $rrow = null;
+    private $reviewNumber = "";
+    private $comment_row = null;
+    public $capability = null;
     private $statistics = null;
-    var $width;
+    var $width = 75;
     private $expansionType = null;
     private $mstate;
 
-    function Mailer($row, $contact, $otherContact = null, $rest = array()) {
+    function __construct($row, $recipient, $rest = array()) {
+        global $Me, $Opt;
         $this->row = $row;
-        $this->contact = $contact;
-        $this->permissionContact = defval($rest, "permissionContact", $contact);
-        $this->contacts = array($contact, defval($rest, "contact2", $otherContact), defval($rest, "contact3", null));
-        $this->hideSensitive = defval($rest, "hideSensitive", false);
-        $this->reason = defval($rest, "reason", "");
-        $this->adminupdate = defval($rest, "adminupdate", false);
-        $this->notes = defval($rest, "notes", "");
-        $this->rrow = defval($rest, "rrow", null);
-        $this->reviewNumber = defval($rest, "reviewNumber", "");
-        $this->comment_row = defval($rest, "comment_row", null);
-        $this->hideReviews = defval($rest, "hideReviews", false);
-        $this->capability = defval($rest, "capability", null);
-        $this->width = 75;
-        $this->expansionType = null;
+        $this->recipient = $recipient;
+        $this->permissionContact = defval($rest, "permissionContact", $recipient);
+        $this->contacts = array($recipient);
+        foreach (array("requester", "reviewer", "other") as $k)
+            if (($v = @$rest[$k . "_contact"]))
+                $this->contacts[$k] = $v;
+        foreach (array("sensitivity", "hideReviews", "reason", "adminupdate", "notes",
+                       "rrow", "reviewNumber", "comment_row", "capability") as $k)
+            if (($v = @$rest[$k]) !== null)
+                $this->$k = $v;
+        // Do not put passwords in email that is cc'd elsewhere
+        if ((!$Me || !$Me->privChair || @$Opt["chairHidePasswords"])
+            && (@$rest["cc"] || @$rest["bcc"])
+            && (@$rest["sensitivity"] === null || @$rest["sensitivity"] === "display"))
+            $this->sensitivity = "high";
         if (isset($rest["mstate"]))
             $this->mstate = $rest["mstate"];
         else
@@ -169,6 +171,26 @@ class Mailer {
             $t = ($t == "" ? $email : "$t <$email>");
 
         return $t;
+    }
+
+    private function _expand_reviewer($type, $isbool) {
+        global $Conf;
+        if (!($c = @$this->contacts["reviewer"]))
+            return false;
+        if ($this->row
+            && $this->rrow
+            && $Conf->is_review_blind($this->rrow)
+            && !@$this->permissionContact->privChair
+            && (!isset($this->permissionContact->canViewReviewerIdentity)
+                || !$this->permissionContact->canViewReviewerIdentity($this->row, $this->rrow, false))) {
+            if ($isbool)
+                return false;
+            else if ($this->expansionType == self::EXPAND_EMAIL)
+                return "<hidden>";
+            else
+                return "Hidden for blind review";
+        }
+        return $this->_expandContact($c, $type);
     }
 
     private function tagger()  {
@@ -249,7 +271,7 @@ class Mailer {
                 $a[$i] = $this->expand($a[$i], "urlpart");
                 $a[$i] = preg_replace('/\&(?=\&|\z)/', "", $a[$i]);
             }
-            return hoturl_absolute($a[0], isset($a[1]) ? $a[1] : "");
+            return hoturl_absolute_nodefaults($a[0], isset($a[1]) ? $a[1] : "");
         }
         if ($what == "%PHP%")
             return $ConfSiteSuffix;
@@ -276,17 +298,33 @@ class Mailer {
         if ($what == "%NUMACCEPTED%")
             return $this->statistics[1];
 
-        if (preg_match('/\A%((?:OTHER)?)(CONTACT|NAME|EMAIL|FIRST|LAST)(|[1-9]\d*)%\z/', $what, $m)
-            && ($m[1] == "" || $m[3] == "")) {
-            $which = ($m[1] == "" && $m[3] == "" ? 0 : ($m[1] == "" ? (int) $m[3] - 1 : 1));
-            if (($c = defval($this->contacts, $which, null)))
+        if (preg_match('/\A%(OTHER|REQUESTER|REVIEWER|)(CONTACT|NAME|EMAIL|FIRST|LAST)%\z/', $what, $m)) {
+            $which = ($m[1] == "" ? 0 : strtolower($m[1]));
+            if ($which === "reviewer") {
+                $x = $this->_expand_reviewer($m[2], $isbool);
+                if ($x !== false || $isbool)
+                    return $x;
+            } else if (($c = @$this->contacts[$which]))
                 return $this->_expandContact($c, $m[2]);
+            else if ($isbool)
+                return false;
+        }
+
+        if ($what == "%REASON%" || $what == "%ADMINUPDATE%" || $what == "%NOTES%") {
+            $which = strtolower(substr($what, 1, strlen($what) - 2));
+            $value = $this->$which;
+            if ($value === null && !$this->recipient)
+                return ($isbool ? null : $what);
+            else if ($what == "%ADMINUPDATE%")
+                return $value ? "An administrator performed this update. " : "";
+            else
+                return $value === null ? "" : $value;
         }
 
         // if no contact, this is a pre-expansion
         $external_password = isset($Opt["ldapLogin"]) || isset($Opt["httpAuthLogin"]);
-        if (!$this->contact) {
-            if ($what == "%PASSWORD%" && $external_password && $isbool)
+        if (!$this->recipient) {
+            if ($isbool && $what == "%PASSWORD%" && $external_password)
                 return false;
             else
                 return ($isbool ? null : $what);
@@ -295,14 +333,20 @@ class Mailer {
         if ($what == "%LOGINURL%" || $what == "%LOGINURLPARTS%" || $what == "%PASSWORD%") {
             $password = null;
             if (!$external_password) {
-                if (isset($this->contact->password_plaintext))
-                    $password = ($this->hideSensitive ? "HIDDEN" : $this->contact->password_plaintext);
-                else if ($this->contact->password_type != 0)
+                $pwd_plaintext = @$this->recipient->password_plaintext;
+                if ($pwd_plaintext && !$this->sensitivity)
+                    $password = $pwd_plaintext;
+                else if ($pwd_plaintext && $this->sensitivity === "display")
+                    $password = "HIDDEN";
+                else if ($this->sensitivity || $this->recipient->password_type != 0)
                     $password = false;
             }
             $loginparts = "";
-            if (!isset($Opt["httpAuthLogin"]))
-                $loginparts = "email=" . urlencode($this->contact->email) . ($password ? "&password=" . urlencode($password) : "");
+            if (!isset($Opt["httpAuthLogin"])) {
+                $loginparts = "email=" . urlencode($this->recipient->email);
+                if ($password)
+                    $loginparts .= "&password=" . urlencode($password);
+            }
             if ($what == "%LOGINURL%")
                 return $Opt["paperSite"] . ($loginparts ? "/?" . $loginparts : "/");
             else if ($what == "%LOGINURLPARTS%")
@@ -311,16 +355,10 @@ class Mailer {
                 return ($isbool || $password !== null ? $password : "");
         }
 
-        if ($what == "%REASON%")
-            return $this->reason;
-        if ($what == "%ADMINUPDATE%")
-            return $this->adminupdate ? "An administrator performed this update. " : "";
-        if ($what == "%NOTES%")
-            return $this->notes;
         if ($what == "%CAPABILITY%")
             return ($isbool || $this->capability ? $this->capability : "");
         if ($what == "%NEWASSIGNMENTS%")
-            return $this->get_new_assignments($this->contact);
+            return $this->get_new_assignments($this->recipient);
 
         // rest is only there if we have a real paper
         if (!$this->row || defval($this->row, "paperId") <= 0) {
@@ -343,7 +381,7 @@ class Mailer {
         if ($what == "%REVIEWNUMBER%")
             return $this->reviewNumber;
         if ($what == "%AUTHOR%" || $what == "%AUTHORS%") {
-            if (!defval($this->permissionContact, "privSuperChair")
+            if (!@$this->permissionContact->is_site_contact
                 && !$this->permissionContact->canViewAuthors($this->row, false))
                 return ($isbool ? false : "Hidden for blind review");
             cleanAuthor($this->row);
@@ -373,21 +411,8 @@ class Mailer {
                 return $this->_expandContact($shep, "EMAIL");
         }
 
-        if ($what == "%REVIEWAUTHOR%" && $this->contacts[1]) {
-            if ($Conf->is_review_blind($this->rrow)
-                && defval($this->permissionContact, "privChair") <= 0
-                && (!isset($this->permissionContact->canViewReviewerIdentity)
-                    || !$this->permissionContact->canViewReviewerIdentity($this->row, $this->rrow, false))) {
-                if ($isbool)
-                    return false;
-                else if ($this->expansionType == self::EXPAND_EMAIL)
-                    return "<hidden>";
-                else
-                    return "Hidden for blind review";
-            }
-            return $this->_expandContact($this->contacts[1], "CONTACT");
-        }
-
+        if ($what == "%REVIEWAUTHOR%" && @$this->contacts["reviewer"])
+            return $this->_expand_reviewer("CONTACT", $isbool);
         if ($what == "%REVIEWS%")
             return $this->get_reviews(false);
         if ($what == "%COMMENTS%")
@@ -639,8 +664,7 @@ class Mailer {
         return $this->expand(self::getTemplate($templateName, $default));
     }
 
-    static function prepareToSend($template, $row, $contact,
-                                  $otherContact = null, &$rest = array()) {
+    static function prepareToSend($template, $row, $recipient, &$rest = array()) {
         global $Conf, $mailTemplates;
 
         // look up template
@@ -650,9 +674,11 @@ class Mailer {
         foreach (self::$mailHeaders as $f => $x)
             if (isset($rest[$f]))
                 $template[$f] = $rest[$f];
+            else if (isset($template[$f]))
+                $rest[$f] = $template[$f];
 
         if (!isset($rest["emailTo"]) || !$rest["emailTo"])
-            $emailTo = $contact;
+            $emailTo = $recipient;
         else if (is_string($rest["emailTo"]))
             $emailTo = (object) array("email" => $rest["emailTo"]);
         else
@@ -670,7 +696,7 @@ class Mailer {
         }
 
         // expand the template
-        $mailer = new Mailer($row, $contact, $otherContact, $rest);
+        $mailer = new Mailer($row, $recipient, $rest);
         $m = $mailer->expand($template);
         $m["subject"] = substr(Mailer::mimeHeader("Subject: ", $m["subject"]), 9);
         $m["to"] = $emailTo->email;
@@ -687,7 +713,7 @@ class Mailer {
                     if (isset($rest["error"]))
                         $rest["error"] = $n;
                     else
-                        $Conf->errorMsg("$h &ldquo;<tt>" . htmlspecialchars($m[$n]) . "</tt>&rdquo; isn't a valid email list.");
+                        $Conf->errorMsg("$h “<tt>" . htmlspecialchars($m[$n]) . "</tt>” isn't a valid email list.");
                     return false;
                 }
                 $m[$n] = substr($hdr, strlen($h) + 2);
@@ -726,24 +752,22 @@ class Mailer {
             if (!@$Opt["emailFromHeader"])
                 $Opt["emailFromHeader"] = Mailer::mimeEmailHeader("From: ", $Opt["emailFrom"]);
             return mail($to, $preparation["subject"], $preparation["body"], $headers . $Opt["emailFromHeader"], $extra);
-        } else if (!$Opt["sendEmail"])
+        } else if (!$Opt["sendEmail"]
+                   && !preg_match('/\Aanonymous\d*\z/', $preparation["to"]))
             return $Conf->infoMsg("<pre>" . htmlspecialchars("To: " . $preparation["to"] . "\n" . $preparation["headers"] . "Subject: " . $preparation["subject"] . "\n\n" . $preparation["body"]) . "</pre>");
     }
 
-    static function send($template, $row, $contact, $otherContact = null, $rest = array()) {
-        if (defval($contact, "disabled"))
-            return;
-        $preparation = self::prepareToSend($template, $row, $contact, $otherContact, $rest);
-        if ($preparation)
+    static function send($template, $row, $recipient, $rest = array()) {
+        if (!defval($recipient, "disabled")
+            && ($preparation = self::prepareToSend($template, $row, $recipient, $rest)))
             self::sendPrepared($preparation);
     }
 
-    static function sendContactAuthors($template, $row, $otherContact = null, $rest = array()) {
+    static function send_contacts($template, $row, $rest = array()) {
         global $Conf, $Me, $mailTemplates;
 
-        $qa = ($Conf->sversion >= 47 ? ", disabled" : "");
         $result = $Conf->qe("select ContactInfo.contactId,
-                firstName, lastName, email, preferredEmail, password, roles$qa,
+                firstName, lastName, email, preferredEmail, password, roles, disabled,
                 conflictType, 0 myReviewType
                 from ContactInfo join PaperConflict using (contactId)
                 where paperId=$row->paperId and conflictType>=" . CONFLICT_AUTHOR . "
@@ -755,7 +779,7 @@ class Mailer {
         $contacts = array();
         while (($contact = edb_orow($result))) {
             $row->assign_contact_info($contact, $contact->contactId);
-            Mailer::send($template, $row, Contact::make($contact), $otherContact, $rest);
+            Mailer::send($template, $row, Contact::make($contact), $rest);
             $contacts[] = Text::user_html($contact);
         }
 
@@ -767,16 +791,15 @@ class Mailer {
                 $contactsmsg = pluralx($contacts, "contact") . ", " . commajoin($contacts);
             else
                 $contactsmsg = "contact(s)";
-            $Conf->infoMsg("Sent email to paper #$row->paperId&rsquo;s $contactsmsg$endmsg");
+            $Conf->infoMsg("Sent email to paper #{$row->paperId}’s $contactsmsg$endmsg");
         }
     }
 
-    static function sendReviewers($template, $row, $otherContact = null, $rest = array()) {
+    static function send_reviewers($template, $row, $rest = array()) {
         global $Conf, $Me, $Opt, $mailTemplates;
 
-        $qa = ($Conf->sversion >= 47 ? ", disabled" : "");
         $result = $Conf->qe("select ContactInfo.contactId,
-                firstName, lastName, email, preferredEmail, password, roles$qa,
+                firstName, lastName, email, preferredEmail, password, roles, disabled,
                 conflictType, reviewType myReviewType
                 from ContactInfo
                 join PaperReview on (PaperReview.contactId=ContactInfo.contactId and PaperReview.paperId=$row->paperId)
@@ -794,7 +817,7 @@ class Mailer {
         $contacts = array();
         while (($contact = edb_orow($result))) {
             $row->assign_contact_info($contact, $contact->contactId);
-            Mailer::send($template, $row, Contact::make($contact), $otherContact, $rest);
+            Mailer::send($template, $row, Contact::make($contact), $rest);
             $contacts[] = Text::user_html($contact);
         }
 
@@ -802,16 +825,16 @@ class Mailer {
         if ($Me->allowAdminister($row) && !$row->has_author($Me)
             && count($contacts)) {
             $endmsg = (isset($rest["infoMsg"]) ? ", " . $rest["infoMsg"] : ".");
-            $Conf->infoMsg("Sent email to paper #$row->paperId&rsquo;s " . pluralx($contacts, "reviewer") . ", " . commajoin($contacts) . $endmsg);
+            $Conf->infoMsg("Sent email to paper #{$row->paperId}’s " . pluralx($contacts, "reviewer") . ", " . commajoin($contacts) . $endmsg);
         }
     }
 
-    static function send_manager($template, $row, $otherContact = null, $rest = array()) {
+    static function send_manager($template, $row, $rest = array()) {
         if ($row && $row->managerContactId
             && ($c = Contact::find_by_id($row->managerContactId)))
-            Mailer::send($template, $row, $c, $otherContact, $rest);
+            Mailer::send($template, $row, $c, $rest);
         else
-            Mailer::send($template, $row, Contact::site_contact(), $otherContact, $rest);
+            Mailer::send($template, $row, Contact::site_contact(), $rest);
     }
 
 
@@ -993,11 +1016,11 @@ class Mailer {
 }
 
 // load mail templates, including local ones if any
-global $ConfSitePATH;
+global $ConfSitePATH, $Opt;
 require_once("$ConfSitePATH/src/mailtemplate.php");
-if (file_exists("$ConfSitePATH/conf/mailtemplate-local.php"))
-    require_once("$ConfSitePATH/conf/mailtemplate-local.php");
-if (file_exists("$ConfSitePATH/conf/mailtemplate-local.inc"))
-    require_once("$ConfSitePATH/conf/mailtemplate-local.inc");
-if (file_exists("$ConfSitePATH/Code/mailtemplate-local.inc"))
-    require_once("$ConfSitePATH/Code/mailtemplate-local.inc");
+if ((@include "$ConfSitePATH/conf/mailtemplate-local.php") !== false
+    || (@include "$ConfSitePATH/conf/mailtemplate-local.inc") !== false
+    || (@include "$ConfSitePATH/Code/mailtemplate-local.inc") !== false)
+    /* do nothing */;
+if (@$Opt["mailtemplate_include"])
+    read_included_options($ConfSitePATH, $Opt["mailtemplate_include"]);

@@ -8,18 +8,18 @@
 // naming work for some browsers.
 
 require_once("src/initweb.php");
-if ($Me->is_empty())
-    $Me->escape();
 
 // Determine the intended paper
-$documentType = requestDocumentType($_REQUEST);
+$documentType = HotCRPDocument::parse_dtype(@$_REQUEST["dt"]);
+if ($documentType === null)
+    $documentType = @$_REQUEST["final"] ? DTYPE_FINAL : DTYPE_SUBMISSION;
 $need_docid = false;
 $docid = null;
 
 if (isset($_REQUEST["p"]))
-    $paperId = rcvtint($_REQUEST["p"]);
+    $paperId = cvtint(@$_REQUEST["p"]);
 else if (isset($_REQUEST["paperId"]))
-    $paperId = rcvtint($_REQUEST["paperId"]);
+    $paperId = cvtint(@$_REQUEST["paperId"]);
 else {
     $s = $orig_s = preg_replace(',\A/*,', "", Navigation::path());
     if (str_starts_with($s, $Opt["downloadPrefix"]))
@@ -28,9 +28,9 @@ else {
         $paperId = $m[1];
         $s = $m[2];
         if (preg_match(',\A([^/]*)\.[^/]+\z,', $s, $m))
-            $documentType = requestDocumentType($m[1], null);
+            $documentType = HotCRPDocument::parse_dtype($m[1]);
         else if (preg_match(',\A([^/]+)/+(.*)\z,', $s, $m)) {
-            $documentType = requestDocumentType($m[1], null);
+            $documentType = HotCRPDocument::parse_dtype($m[1]);
             if ($documentType
                 && ($o = PaperOption::find($documentType))
                 && $o->type == "attachments") {
@@ -42,19 +42,16 @@ else {
         }
     } else if (preg_match(',\Apaper([1-9]\d*)-([^/]*)\.[^/]+\z,', $s, $m)) {
         $paperId = $m[1];
-        $documentType = requestDocumentType($m[2], null);
+        $documentType = HotCRPDocument::parse_dtype($m[2]);
     } else if (preg_match(',\A([-A-Za-z0-9_]*?)?-?([1-9]\d*)\.[^/]*\z,', $s, $m)) {
         $paperId = $m[2];
-        $documentType = requestDocumentType($m[1], null);
+        $documentType = HotCRPDocument::parse_dtype($m[1]);
     } else
         $documentType = null;
     if ($documentType === null)
         $Error = "Unknown document “" . htmlspecialchars($orig_s) . "”.";
 }
 
-// Security checks - people who can download all paperss
-// are assistants, chairs & PC members. Otherwise, you need
-// to be a contact person for that paper.
 if (!isset($Error)
     && !($prow = $Conf->paperRow($paperId, $Me, $whyNot)))
     $Error = whyNotText($whyNot, "view");
@@ -69,7 +66,7 @@ if (!isset($Error) && $need_docid && !$docid)
 // Actually download paper.
 if (!isset($Error)) {
     session_write_close();      // to allow concurrent clicks
-    if ($Conf->downloadPaper($prow, rcvtint($_REQUEST["save"]) > 0, $documentType, $docid))
+    if ($Conf->downloadPaper($prow, cvtint(@$_REQUEST["save"]) > 0, $documentType, $docid))
         exit;
 }
 

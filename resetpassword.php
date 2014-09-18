@@ -5,17 +5,23 @@
 
 require_once("src/initweb.php");
 if (!isset($_REQUEST["resetcap"])
-    && preg_match(',\A/(1[-\w]+)(?:/|\z),i', Navigation::path(), $m))
+    && preg_match(',\A/(U?1[-\w]+)(?:/|\z),i', Navigation::path(), $m))
     $_REQUEST["resetcap"] = $m[1];
 
 if (!isset($_REQUEST["resetcap"]))
     error_go(false, "You didn’t enter the full password reset link into your browser. Make sure you include the reset code (the string of letters, numbers, and other characters at the end).");
 
-$capdata = $Conf->check_capability($_REQUEST["resetcap"]);
+$iscdb = substr($_REQUEST["resetcap"], 0, 1) === "U";
+$capmgr = $Conf->capability_manager($_REQUEST["resetcap"]);
+$capdata = $capmgr->check($_REQUEST["resetcap"]);
 if (!$capdata || $capdata->capabilityType != CAPTYPE_RESETPASSWORD)
     error_go(false, "That password reset code has expired, or you didn’t enter it correctly.");
 
-if (!($Acct = Contact::find_by_id($capdata->contactId)))
+if ($iscdb)
+    $Acct = Contact::contactdb_find_by_id($capdata->contactId);
+else
+    $Acct = Contact::find_by_id($capdata->contactId);
+if (!$Acct)
     error_go(false, "That password reset code refers to a user who no longer exists. Either create a new account or contact the conference administrator.");
 
 if (isset($Opt["ldapLogin"]) || isset($Opt["httpAuthLogin"]))
@@ -30,17 +36,17 @@ if (isset($_REQUEST["go"]) && check_post()) {
         $_REQUEST["upassword"] = $_REQUEST["upassword2"] = $_REQUEST["autopassword"];
     if (!isset($_REQUEST["upassword"]) || $_REQUEST["upassword"] == "")
         $Conf->errorMsg("You must enter a password.");
-    else if ($_REQUEST["upassword"] != $_REQUEST["upassword2"])
+    else if ($_REQUEST["upassword"] !== $_REQUEST["upassword2"])
         $Conf->errorMsg("The two passwords you entered did not match.");
-    else if (trim($_REQUEST["upassword"]) != $_REQUEST["upassword"])
-        $Conf->errorMsg("Passwords cannot begin or end with spaces.");
+    else if (!Contact::valid_password($_REQUEST["upassword"]))
+        $Conf->errorMsg("Invalid password.");
     else {
-        $Acct->change_password($_REQUEST["upassword"]);
-        $Conf->q("update ContactInfo set password='" . sqlq($Acct->password) . "' where contactId=" . $Acct->contactId);
+        $Acct->change_password($_REQUEST["upassword"], true);
         $Acct->log_activity("Reset password");
-        $Conf->infoMsg("Your password has been changed and you are now signed in to the conference site.");
-        $Conf->delete_capability($capdata);
-        go(hoturl("index", "email=" . urlencode($Acct->email) . "&password=" . urlencode($_REQUEST["upassword"])));
+        $Conf->confirmMsg("Your password has been changed. You may now sign in to the conference site.");
+        $capmgr->delete($capdata);
+        $Conf->save_session("password_reset", (object) array("time" => $Now, "email" => $Acct->email, "password" => $_REQUEST["upassword"]));
+        go(hoturl("index"));
     }
     $password_class = " error";
 }
@@ -81,13 +87,13 @@ echo "</div>
     "&nbsp;</td><td style='padding-top:1em'>", Ht::label("Use this password:"), "</td></tr>
   <tr><td></td><td><div class='f-i'>
   <div class='f-c", $password_class, "'>Password</div>
-  <div class='f-e'><input id='login_d' type='password' class='textlite' name='upassword' size='36' tabindex='1' value='' onkeypress='if(!((x=\$\$(\"usemy\")).checked)) x.click()' /></div>
+  <div class='f-e'><input id='login_d' type='password' name='upassword' size='36' tabindex='1' value='' onkeypress='if(!((x=\$\$(\"usemy\")).checked)) x.click()' /></div>
 </div>
 <div class='f-i'>
   <div class='f-c", $password_class, "'>Password (again)</div>
-  <div class='f-e'><input id='login_d' type='password' class='textlite' name='upassword2' size='36' tabindex='1' value='' /></div>
+  <div class='f-e'><input id='login_d' type='password' name='upassword2' size='36' tabindex='1' value='' /></div>
 </div></td></tr>
-<tr><td></td><td style='padding-top:1em'>
+<tr><td colspan='2' style='padding-top:1em'>
 <div class='f-i'>",
     Ht::submit("go", "Reset password", array("tabindex" => 1)),
     "</div></td>
@@ -96,5 +102,5 @@ echo "</div>
 <hr class='home' /></div>\n";
 $Conf->footerScript("crpfocus(\"login\", null, 2)");
 
-echo "<div class='clear'></div>\n";
+echo '<hr class="c" />', "\n";
 $Conf->footer();

@@ -165,7 +165,7 @@ class PaperTable {
         if (isset($Error[$what]) || isset($Warning[$what]))
             $c .= " error";
         return $c . '"><span class="papfn">' . $name
-            . '</span><div class="clear"></div></div>';
+            . '</span><hr class="c" /></div>';
     }
 
     private function papt($what, $name, $extra = array()) {
@@ -224,7 +224,7 @@ class PaperTable {
                 . Ht::img("edit.png", "[Edit]", "bmabs")
                 . "</span>&nbsp;<u class=\"x\">Edit</u></a></span>";
         }
-        $c .= "<div class=\"clear\"></div></div>";
+        $c .= "<hr class=\"c\" /></div>";
         return $c;
     }
 
@@ -259,7 +259,7 @@ class PaperTable {
         }
 
         if ($this->editable)
-            $text = "<textarea class='textlite papertext' name='$fieldName' rows='" . $textAreaRows[$fieldName] . "' cols='60' onchange='hiliter(this)'>" . $text . "</textarea>";
+            $text = "<textarea class='papertext' name='$fieldName' rows='" . $textAreaRows[$fieldName] . "' cols='60' onchange='hiliter(this)'>" . $text . "</textarea>";
         return $text;
     }
 
@@ -428,7 +428,7 @@ class PaperTable {
         if ($prow && $storageId > 1 && $banal
             && defval($prow, "mimetype", "application/pdf") == "application/pdf") {
             echo "<div id='foldcheckformat$documentType' class='foldc'><div id='checkformatform${documentType}result' class='fx'><div class='xinfo'>Checking format, please wait (this can take a while)...</div></div></div>";
-            $Conf->footerHtml("<form id='checkformatform$documentType' class='fold7c' method='post' action='" . hoturl_post("paper", "p=$prow->paperId&amp;dt=$documentType") . "' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return Miniajax.submit(\"checkformatform$documentType\")'><div>"
+            $Conf->footerHtml(Ht::form_div(hoturl_post("paper", "p=$prow->paperId&amp;dt=$documentType"), array("id" => "checkformatform$documentType", "class" => "fold7c", "onsubmit" => "return Miniajax.submit('checkformatform$documentType')"))
                               . Ht::hidden("checkformat", 1)
                               . "</div></form>");
         }
@@ -510,7 +510,7 @@ class PaperTable {
         cleanAuthor($this->prow);
 
         echo $this->editable_papt("authorInformation", "Authors <span class='papfnh'>(<a href='#' onclick='return authorfold(\"auedit\",1,1)'>More</a> | <a href='#' onclick='return authorfold(\"auedit\",1,-1)'>Fewer</a>)</span>"),
-            "<div class='paphint'>List the paper&rsquo;s authors one per line, including their email addresses and affiliations.";
+            "<div class='paphint'>List the paper’s authors one per line, including their email addresses and affiliations.";
         if ($Conf->submission_blindness() == Conference::BLIND_ALWAYS)
             echo " Submission is blind, so reviewers will not be able to see author information.";
         echo "  Any author with an account on this site can edit the paper.</div>",
@@ -530,9 +530,9 @@ class PaperTable {
             else
                 $auname = $au[0] . $au[1];
             echo "<tr id='auedit$n' class='auedito'><td class='rxcaption'>", $n, ".</td>",
-                "<td class='lentry'>", Ht::entry("auname$n", $auname, array("class" => "textlite", "size" => "35", "onchange" => "hiliter(this)")), "</td>",
-                "<td class='lentry'>", Ht::entry("auemail$n", $au[2], array("class" => "textlite", "size" => "30", "onchange" => "hiliter(this)")), "</td>",
-                "<td class='lentry'>", Ht::entry("auaff$n", $au[3], array("class" => "textlite", "size" => "32", "onchange" => "hiliter(this)")), "</td>",
+                "<td class='lentry'>", Ht::entry("auname$n", $auname, array("size" => "35", "onchange" => "hiliter(this)")), "</td>",
+                "<td class='lentry'>", Ht::entry("auemail$n", $au[2], array("size" => "30", "onchange" => "hiliter(this)")), "</td>",
+                "<td class='lentry'>", Ht::entry("auaff$n", $au[3], array("size" => "32", "onchange" => "hiliter(this)")), "</td>",
                 "</tr>\n";
         }
         echo "</table>", Ht::hidden("aueditcount", "25", array("id" => "aueditcount")), "</div>\n\n";
@@ -668,7 +668,7 @@ class PaperTable {
             echo '</span>';
         if (!$viewable || $this->allFolded)
             echo '</a>';
-        echo '</span><div class="clear"></div></div>';
+        echo '</span><hr class="c" /></div>';
 
         // contents
         $inauthors = "";
@@ -757,10 +757,10 @@ class PaperTable {
             // display it
             $folded = $showAllOptions && !$Me->canViewPaperOption($this->prow, $o, false);
             if (@$o->highlight || @$o->near_submission) {
-                $x = "<div class='pgsm" . ($folded ? " fx8" : "") . "'>"
-                    . "<div class='papt'><span class='papfn'>"
+                $x = '<div class="pgsm' . ($folded ? " fx8" : "") . '">'
+                    . '<div class="papt"><span class="papfn">'
                     . ($show_on ? $on : $ox) . "</span>"
-                    . "<div class='clear'></div></div>";
+                    . '<hr class="c" /></div>';
                 if ($show_on && $ox !== true)
                     $x .= "<div class='pavb'>" . $ox . "</div>";
                 $xoptionhtml[] = $x . "</div>\n";
@@ -834,8 +834,8 @@ class PaperTable {
         $email = $this->useRequest ? @trim($_REQUEST["newcontact_email"]) : "";
         $email = $email == "Email" ? "" : $email;
         list($name, $email, $class) = $email
-            ? array($name, $email, "textlite temptextoff")
-            : array("Name", "Email", "textlite temptext");
+            ? array($name, $email, "temptextoff")
+            : array("Name", "Email", "temptext");
         echo '<table><tr><td class="lcaption">Add</td>',
             '<td></td><td>',
             Ht::entry('newcontact_name', $name,
@@ -864,12 +864,12 @@ class PaperTable {
             "onclick=\"\$\$('setcontacts').value=2;return foldup(this,event)\"",
             '><span class="papfn"><a class="q" href="#" ',
             "onclick=\"\$\$('setcontacts').value=2;return foldup(this,event)\"",
-            ' title="Edit contacts">', expander(true), 'Contacts</a></span><div class="clear"></div></div>',
+            ' title="Edit contacts">', expander(true), 'Contacts</a></span><hr class="c" /></div>',
             '<div class="papt fx0',
             (@$Error["contactAuthor"] ? " error" : ""),
             '"><span class="papfn">',
             ($always_unfold ? "" : expander(false)),
-            'Contacts</span><div class="clear"></div></div>';
+            'Contacts</span><hr class="c" /></div>';
 
         // Non-editable version
         echo '<div class="papv fn0">';
@@ -926,8 +926,8 @@ class PaperTable {
         $email = $this->useRequest ? @trim($_REQUEST["newcontact_email"]) : "";
         $email = $email == "Email" ? "" : $email;
         list($name, $email, $class) = $email
-            ? array($name, $email, "textlite temptextoff")
-            : array("Name", "Email", "textlite temptext");
+            ? array($name, $email, "temptextoff")
+            : array("Name", "Email", "temptext");
         echo '<tr><td class="lcaption">Add</td>',
             '<td></td><td>',
             Ht::entry('newcontact_name', $name,
@@ -948,7 +948,7 @@ class PaperTable {
         assert(!!$this->editable);
         echo $this->editable_papt("blind", Ht::checkbox_h("blind", 1, $blind)
                                   . "&nbsp;" . Ht::label("Anonymous submission")),
-            "<div class='paphint'>", htmlspecialchars($Opt["shortName"]), " allows either anonymous or named submission.  Check this box to submit the paper anonymously (reviewers won&rsquo;t be shown the author list).  Make sure you also remove your name from the paper itself!</div>\n",
+            "<div class='paphint'>", htmlspecialchars($Opt["shortName"]), " allows either anonymous or named submission.  Check this box to submit the paper anonymously (reviewers won’t be shown the author list).  Make sure you also remove your name from the paper itself!</div>\n",
             "<div class='papv'></div>\n\n";
     }
 
@@ -1101,11 +1101,11 @@ class PaperTable {
                     }
                     echo "</div>\n\n";
                 } else if ($o->type == "numeric")
-                    echo "<div class='papv'><input type='text' class='textlite' name='$optid' value=\"", htmlspecialchars($myval), "\" size='8' onchange='hiliter(this)' /></div>\n\n";
+                    echo "<div class='papv'><input type='text' name='$optid' value=\"", htmlspecialchars($myval), "\" size='8' onchange='hiliter(this)' /></div>\n\n";
                 else if ($o->type == "text" && @$o->display_space <= 1)
-                    echo "<div class='papv'><input type='text' class='textlite papertext' name='$optid' value=\"", htmlspecialchars($myval), "\" size='40' onchange='hiliter(this)' /></div>\n\n";
+                    echo "<div class='papv'><input type='text' class='papertext' name='$optid' value=\"", htmlspecialchars($myval), "\" size='40' onchange='hiliter(this)' /></div>\n\n";
                 else if ($o->type == "text")
-                    echo "<div class='papv'><textarea class='textlite papertext' name='$optid' rows='5' cols='60' onchange='hiliter(this)'>", htmlspecialchars($myval), "</textarea></div>\n\n";
+                    echo "<div class='papv'><textarea class='papertext' name='$optid' rows='5' cols='60' onchange='hiliter(this)'>", htmlspecialchars($myval), "</textarea></div>\n\n";
             } else
                 $this->editable_document($o, $optx ? $optx->value : 0, 0);
         }
@@ -1254,8 +1254,8 @@ class PaperTable {
         echo "</p>";
 
         if ($editable) {
-            echo "<form id='${type}form' class='fx fold7c' method='post' action='", hoturl_post("review", "p=" . $this->prow->paperId), "' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return dosubmitstripselector(\"${type}\")'>",
-                "<div class='inform'>", Ht::hidden("set$type", 1);
+            echo Ht::form_div(hoturl_post("review", "p=" . $this->prow->paperId), array("id" => "${type}form", "class" => "fx fold7c", "onsubmit" => "return dosubmitstripselector('$type')")),
+                Ht::hidden("set$type", 1);
             $Conf->footerScript("Miniajax.onload(\"${type}form\")");
 
             $sel = array("0" => "None");
@@ -1307,8 +1307,7 @@ class PaperTable {
             echo "<div class=\"", trim("pscopen $color"), "\">";
 
             if ($editable)
-                echo Ht::form(hoturl_post($site, "p=" . $this->prow->paperId), array("id" => "tagform", "onsubmit" => "return save_tags()")),
-                    '<div class="inform">';
+                echo Ht::form_div(hoturl_post($site, "p=" . $this->prow->paperId), array("id" => "tagform", "onsubmit" => "return save_tags()"));
 
             echo $this->papt("tags", "Tags", array("type" => "ps", "editfolder" => ($editable ? "tags" : 0))),
                 "<div class='psv' style='position:relative'>";
@@ -1351,8 +1350,9 @@ class PaperTable {
         global $Conf, $Error;
         echo $this->_papstripBegin("decision", defval($_REQUEST, "atab") != "decision"),
             $this->papt("decision", "Decision", array("type" => "ps", "fold" => "decision")),
-            "<div class='psv'><form id='decisionform' class='fx fold7c' method='post' action='", hoturl_post("review", "p=" . $this->prow->paperId), "' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return dosubmitstripselector(\"decision\")'>",
-            "<div class='inform'>", Ht::hidden("setdecision", 1);
+            "<div class='psv'>",
+            Ht::form_div(hoturl_post("review", "p=" . $this->prow->paperId), array("id" => "decisionform", "class" => "fx fold7c", "onsubmit" => "return dosubmitstripselector('decision')")),
+            Ht::hidden("setdecision", 1);
         if (isset($_REQUEST["forceShow"]))
             echo Ht::hidden("forceShow", $_REQUEST["forceShow"] ? 1 : 0);
         $outcomes = $Conf->outcome_map();
@@ -1369,14 +1369,14 @@ class PaperTable {
         global $Conf, $CurrentList;
         echo $this->_papstripBegin(),
             $this->papt("revpref", "Review preference", array("type" => "ps")),
-            "<div class='psv'><form id='revprefform' class='fold7c' method='post' action='", hoturl_post("review", "p=" . $this->prow->paperId), "' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return Miniajax.submit(\"revprefform\")'>",
-            "<div class='aahc inform'>",
+            "<div class='psv'>",
+            Ht::form_div(hoturl_post("review", "p=" . $this->prow->paperId), array("id" => "revprefform", "class" => "fold7c", "onsubmit" => "return Miniajax.submit('revprefform')", "divclass" => "aahc")),
             Ht::hidden("setrevpref", 1);
         if (isset($_REQUEST["forceShow"]))
             echo Ht::hidden("forceShow", $_REQUEST["forceShow"] ? 1 : 0);
         $rp = unparse_preference($this->prow);
         $rp = ($rp == "0" ? "" : $rp);
-        echo "<input id='revprefform_d' class='textlite' type='text' size='4' name='revpref' value=\"$rp\" onchange='Miniajax.submit(\"revprefform\")' tabindex='1' />",
+        echo "<input id='revprefform_d' type='text' size='4' name='revpref' value=\"$rp\" onchange='Miniajax.submit(\"revprefform\")' tabindex='1' />",
             " ", Ht::submit("Save", array("class" => "fx7")),
             " <span id='revprefformresult'></span>",
             "</div></form></div></div>\n";
@@ -1396,15 +1396,17 @@ class PaperTable {
             $rp = "";
 
         // rank context form
-        $Conf->footerHtml("<form id='rankctxform' class='fold7c' method='post' action='" . hoturl_post("paper", "p=" . $this->prow->paperId) . "' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return Miniajax.submit(\"rankctxform\")'><div class='aahc'>" . Ht::hidden("rankctx", 1) . "</div></form>");
+        $Conf->footerHtml(Ht::form_div(hoturl_post("paper", "p=" . $this->prow->paperId), array("id" => "rankctxform", "class" => "fold7c", "onsubmit" => "return Miniajax.submit('rankctxform')", "divclass" => "aahc"))
+                          . Ht::hidden("rankctx", 1) . "</div></form>");
 
         echo $this->_papstripBegin("rank", true, "fold2c"),
             $this->papt("rank", "Your rank", array("type" => "ps", "editfolder" => "rank")),
-            "<div class='psv'><form id='rankform' class='fx fold7c' method='post' action='" . hoturl_post("review", "p=" . $this->prow->paperId) . "' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return Miniajax.submit(\"rankform\")'>",
-            "<div class='inform'>", Ht::hidden("setrank", 1);
+            "<div class='psv'>",
+            Ht::form_div(hoturl_post("review", "p=" . $this->prow->paperId), array("id" => "rankform", "class" => "fx fold7c", "onsubmit" => "return Miniajax.submit('rankform')")),
+            Ht::hidden("setrank", 1);
         if (isset($_REQUEST["forceShow"]))
             echo Ht::hidden("forceShow", $_REQUEST["forceShow"] ? 1 : 0);
-        echo "<input id='foldrank_d' class='textlite' type='text' size='4' name='rank' value=\"$rp\" onchange='Miniajax.submit(\"rankform\")' tabindex='1' />",
+        echo "<input id='foldrank_d' type='text' size='4' name='rank' value=\"$rp\" onchange='Miniajax.submit(\"rankform\")' tabindex='1' />",
             " ", Ht::submit("Save", array("class" => "fx7")),
             " <span id='rankformresult'></span>",
             " <div class='hint'><strong>Tip:</strong> <a href='", hoturl("search", "q=" . urlencode("editsort:#~$tag")), "'>Search “editsort:#~${tag}”</a> to drag and drop your ranking, or <a href='", hoturl("offline"), "'>use offline reviewing</a> to rank many papers at once.</div>",
@@ -1443,8 +1445,7 @@ class PaperTable {
         $row = edb_row($result);
 
         echo $this->_papstripBegin(),
-            "<form id='watchform' class='fold7c' action=\"", hoturl_post("paper", "p=$prow->paperId&amp;setfollow=1"), "\" method='post' enctype='multipart/form-data' accept-charset='UTF-8' onsubmit='return Miniajax.submit(\"watchform\")'>",
-            "<div class='inform'>";
+            Ht::form_div(hoturl_post("paper", "p=$prow->paperId&amp;setfollow=1"), array("id" => "watchform", "class" => "fold7c", "onsubmit" => "Miniajax.submit('watchform')"));
 
         if ($row[4] && ($row[4] & ($this->watchCheckbox >> 1)))
             $watchValue = $row[4];
@@ -1603,17 +1604,9 @@ class PaperTable {
             // produce button
             if ($can_update)
                 $buttons[] = array(Ht::submit($updater, "Save changes", array("class" => "bb")), "");
-            else if ($this->admin) {
-                $buttons[] = array(Ht::js_button("Save changes", "popup(this,'saveoverride',0)"), "(admin only)");
-                Ht::popup("saveoverride",
-                          "<p>" . whyNotText($whyNot, $prow ? "update" : "register")
-                          . " Are you sure you want to override this deadline?</p>",
-                          Ht::form(hoturl_post("paper", "p=$pid&amp;m=pe"),
-                                   array("onsubmit" => "return false")),
-                          Ht::js_button("Cancel", "popup(null,'saveoverride',1)")
-                          . " &nbsp;"
-                          . Ht::js_button("Save changes", "paperedit_submit_override('$updater');popup(null,'saveoverride',1)"));
-            } else if ($prow && $prow->timeSubmitted > 0)
+            else if ($this->admin)
+                $buttons[] = array(Ht::js_button("Save changes", "override_deadlines(this)", array("hotoverridetext" => whyNotText($whyNot, $prow ? "update" : "register"), "hotoverridesubmit" => $updater)), "(admin only)");
+            else if ($prow && $prow->timeSubmitted > 0)
                 $buttons[] = array(Ht::submit("updatecontacts", "Save contacts", array("class" => "b")), "");
             else if ($Conf->timeFinalizePaper($prow))
                 $buttons[] = array(Ht::submit("update", "Save changes", array("class" => "bb")));
@@ -1636,9 +1629,9 @@ class PaperTable {
                     . Ht::label("Override deadlines") . "</div>";
             $Conf->footerHtml("<div id='popup_w' class='popupc'>
   <p>Are you sure you want to withdraw this paper from consideration and/or
-  publication?  $admins</p>
-  <form method='post' action=\"" . hoturl_post("paper", "p=" . $prow->paperId . "&amp;m=pe") . "\" enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>
-    <textarea id='withdrawreason' class='temptext' name='reason' rows='3' cols='40' style='width:99%'>Optional explanation</textarea>$override
+  publication?  $admins</p>\n"
+    . Ht::form_div(hoturl_post("paper", "p=" . $prow->paperId . "&amp;m=pe"))
+    . "<textarea id='withdrawreason' class='temptext' name='reason' rows='3' cols='40' style='width:99%'>Optional explanation</textarea>$override
     <div class='popup_actions' style='margin-top:10px'>\n"
     . Ht::hidden("doemail", 1, array("class" => "popup_populate"))
     . Ht::hidden("emailNote", "", array("class" => "popup_populate"))
@@ -1681,7 +1674,7 @@ class PaperTable {
                 "    <tr><td>",
                 Ht::checkbox("doemail", 1, true), "&nbsp;",
                 Ht::label("Email authors, including:"), "&nbsp; ",
-                "<input id='emailNote' type='text' class='textlite temptext' name='emailNote' size='30' value=\"",
+                "<input id='emailNote' type='text' class='temptext' name='emailNote' size='30' value=\"",
                 htmlspecialchars($v == "" ? "Optional explanation" : $v),
                 "\" />",
                 Ht::hidden("override", 1),
@@ -1766,7 +1759,7 @@ class PaperTable {
             if ($canAssign)
                 $this->_paptabTabLink("Assign", hoturl("assign", "p=$prow->paperId"), "assign18.png", $this->mode == "assign");
 
-            echo "<div class='clear'></div></div></div>\n";
+            echo "<hr class=\"c\" /></div></div>\n";
         }
 
         // paper number
@@ -1785,15 +1778,22 @@ class PaperTable {
         echo "</div>\n";
     }
 
-    private function _echo_clickthrough($form, $ctype, $ctime) {
-        global $Conf;
-        echo $form, "<div class='aahc'>", $Conf->setting_data("clickthrough_$ctype");
-        $buttons = array(Ht::submit("clickthrough_accept", "Accept", array("class" => "bb")),
-                         Ht::submit("clickthrough_decline", "Decline", array("class" => "b")));
+    static private function _echo_clickthrough($ctype) {
+        global $Conf, $Now;
+        $data = $Conf->message_html("clickthrough_$ctype");
+        echo Ht::form(hoturl_post("profile"), array("onsubmit" => "return handle_clickthrough(this)")), "<div class='aahc'>", $data;
+        $buttons = array(Ht::submit("clickthrough_accept", "Accept", array("class" => "bb")));
         echo "<div class='g'></div>",
             Ht::hidden("clickthrough", $ctype),
-            Ht::hidden("clickthrough_time", $ctime),
+            Ht::hidden("clickthrough_sha1", sha1($data)),
+            Ht::hidden("clickthrough_time", $Now),
             Ht::actions($buttons), "</div></form>";
+    }
+
+    static public function echo_review_clickthrough() {
+        echo '<div class="revcard clickthrough"><div class="revcard_head"><h3>Reviewing terms</h3></div><div class="revcard_body">You must agree to these terms before you can save reviews.<hr />';
+        self::_echo_clickthrough("review");
+        echo "</form></div></div>";
     }
 
     private function _echo_editable_body($form) {
@@ -1875,11 +1875,13 @@ class PaperTable {
 
         $this->echoDivEnter();
         if ($this->editable) {
-            if (!$Me->privChair
-                && @($ctime = $Conf->setting("clickthrough_submit"))
-                && @($Me->data("clickthrough_submit") < $ctime))
-                $this->_echo_clickthrough($form, "submit", $ctime);
-            else
+            if (!$Me->can_clickthrough("submit")) {
+                echo '<div class="clickthrough"><h3>Submission terms</h3>You must agree to these terms before you can submit a paper.<hr />';
+                self::_echo_clickthrough("submit");
+                echo '</div><div id="clickthrough_show" style="display:none">';
+                $this->_echo_editable_body($form);
+                echo '</div>';
+            } else
                 $this->_echo_editable_body($form);
         } else {
             if ($this->mode == "pe" && ($m = $this->editMessage()))
@@ -1990,35 +1992,22 @@ class PaperTable {
         $prow = $this->prow;
 
         // show comments as well
-        if ((count($this->mycrows) || $Me->canComment($prow, null)
-             || $Conf->timeAuthorRespond()) && !$this->allreviewslink) {
+        if ((count($this->mycrows) || $Me->canComment($prow, null) || $Conf->timeAuthorRespond())
+            && !$this->allreviewslink) {
             $cv = new CommentView;
-            $editablecid = defval($_REQUEST, "commentId", "xxx");
-            if (isset($_REQUEST["noedit"]))
-                $editablecid = "xxx";
-            $editableresponse = $Conf->timeAuthorRespond() && $prow->has_author($Me);
-
+            $s = "";
+            $nresponse = 0;
             foreach ($this->mycrows as $cr) {
-                $editMode = $editablecid == $cr->commentId
-                    || ($editableresponse
-                        && ($cr->commentType & COMMENTTYPE_RESPONSE));
-                $cv->show($prow, $cr, $editMode && $useRequest, $editMode);
+                $nresponse = $nresponse || ($cr->commentType & COMMENTTYPE_RESPONSE);
+                $s .= "papercomment.add(" . json_encode($cv->json($prow, $cr)) . ");\n";
             }
-
-            // comment editing
             if ($Me->canComment($prow, null))
-                $cv->show($prow, null, $editablecid == "new" && $useRequest,
-                          true, $editablecid != "new");
-            if (!$cv->nresponse && $Conf->timeAuthorRespond()
-                && ($prow->has_author($Me)
-                    || ($Me->canAdminister($prow) && $editablecid == "response")))
-                $cv->showResponse($prow, null, false, true);
-
-            $cv->table_end();
-            $Conf->save_session("comment_msgs", null);
-
-            Ht::stash_script("jQuery('textarea.reviewtext').autogrow()",
-                             "reviewtext_autogrow");
+                $s .= "papercomment.add({is_new:true,editable:true});\n";
+            if (!$nresponse && $Conf->timeAuthorRespond() && $prow->has_author($Me))
+                $s .= "papercomment.add({is_new:true,editable:true,response:true},true);\n";
+            echo '<div id="cmtcontainer"></div>';
+            CommentView::echo_script($prow);
+            $Conf->echoScript($s);
         }
     }
 
@@ -2045,7 +2034,7 @@ class PaperTable {
         $viewall = $Me->canViewReview($prow, null, false, $whyNot);
         $msgs = array();
         if (!$this->rrow && $this->prow->reviewType <= 0)
-            $msgs[] = "You haven&rsquo;t been assigned to review this paper, but you can review it anyway.";
+            $msgs[] = "You haven’t been assigned to review this paper, but you can review it anyway.";
         if ($Me->is_admin_force() && !$viewall) {
             $msgs[] = $this->_privilegeMessage();
         } else if (!$viewall && isset($whyNot["reviewNotComplete"])
@@ -2063,21 +2052,26 @@ class PaperTable {
         // links
         $this->_paptabReviewLinks(true, $this->editrrow, "");
 
+        // maybe clickthrough
+        $clickthrough_close = "";
+        if (!$Me->can_clickthrough("review"))
+            self::echo_review_clickthrough();
+
         // review form, possibly with deadline warning
         $opt = array("edit" => $this->mode == "re");
 
         if ($this->editrrow
             && ($Me->ownReview($this->editrrow) || $actChair)
-            && !$Conf->time_review($actPC, true)) {
+            && !$Conf->time_review($this->editrrow, $actPC, true)) {
             if ($actChair)
-                $override = "  As an administrator, you can override this deadline using the “Override deadlines” checkbox.";
+                $override = " As an administrator, you can override this deadline.";
             else {
                 $override = "";
                 if ($this->editrrow->reviewSubmitted)
                     $opt["edit"] = false;
             }
-            if (!$Conf->time_review($actPC, true, true))
-                $opt["editmessage"] = "The <a href='" . hoturl("deadlines") . "'>deadline</a> for changing reviews has passed, so the review can no longer be changed.$override";
+            if ($Conf->time_review_open())
+                $opt["editmessage"] = "The <a href='" . hoturl("deadlines") . "'>review deadline</a> has passed, so the review can no longer be changed.$override";
             else
                 $opt["editmessage"] = "The site is not open for reviewing, so the review cannot be changed.$override";
         } else if (!$Me->canReview($prow, $this->editrrow))

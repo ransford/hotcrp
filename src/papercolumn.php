@@ -48,7 +48,7 @@ class PaperColumn extends Column {
     public function analyze($pl, &$rows) {
     }
 
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
     }
     public function id_sorter($a, $b) {
         return $a->paperId - $b->paperId;
@@ -104,7 +104,7 @@ class SelectorPaperColumn extends PaperColumn {
         if ($this->name == "selconf" && !$pl->contact->privChair)
             return false;
         if ($this->name == "selconf" || $this->name == "selunlessconf")
-            $queryOptions["reviewer"] = $pl->reviewer ? $pl->reviewer : $pl->contact->cid;
+            $queryOptions["reviewer"] = $pl->reviewer_cid();
         if ($this->name == "selconf")
             $Conf->footerScript("add_conflict_ajax()");
         return true;
@@ -172,7 +172,7 @@ class StatusPaperColumn extends PaperColumn {
                             array("cssname" => "status", "sorter" => "status_sorter"));
         $this->is_long = $is_long;
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         $force = $pl->search->limitName != "a" && $pl->contact->privChair;
         foreach ($rows as $row)
             $row->_status_sort_info = ($pl->contact->canViewDecision($row, $force) ? $row->outcome : -10000);
@@ -217,7 +217,7 @@ class ReviewStatusPaperColumn extends PaperColumn {
         return $pl->contact->is_reviewer() || $this->auview
             || $pl->contact->privChair;
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         foreach ($rows as $row)
             $row->_review_status_sort_info = !$this->content_empty($pl, $row);
     }
@@ -420,7 +420,7 @@ class ReviewerTypePaperColumn extends PaperColumn {
         // PaperSearch is responsible for access control checking use of
         // `reviewerContact`, but we are careful anyway.
         if ($pl->search->reviewer_cid()
-            && $pl->search->reviewer_cid() != $pl->contact->cid
+            && $pl->search->reviewer_cid() != $pl->contact->contactId
             && count($rows)) {
             $by_pid = array();
             foreach ($rows as $row)
@@ -439,7 +439,7 @@ class ReviewerTypePaperColumn extends PaperColumn {
         } else
             $this->xreviewer = false;
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         if (!$this->xreviewer) {
             foreach ($rows as $row) {
                 $row->_reviewer_type_sort_info = $row->reviewType;
@@ -524,7 +524,9 @@ class ReviewDelegationPaperColumn extends PaperColumn {
     public function prepare($pl, &$queryOptions, $visible) {
         if (!$pl->contact->isPC)
             return false;
-        $queryOptions["allReviewScores"] = $queryOptions["reviewerName"] = 1;
+        $queryOptions["reviewerName"] = true;
+        $queryOptions["allReviewScores"] = true;
+        $queryOptions["reviewLimitSql"] = "PaperReview.requestedBy=" . $pl->reviewer_cid();
         return true;
     }
     public function review_delegation_sorter($a, $b) {
@@ -552,7 +554,7 @@ class AssignReviewPaperColumn extends ReviewerTypePaperColumn {
             return false;
         if ($visible > 0)
             $Conf->footerScript("add_assrev_ajax()");
-        $queryOptions["reviewer"] = $pl->reviewer ? $pl->reviewer : $pl->contact->cid;
+        $queryOptions["reviewer"] = $pl->reviewer_cid();
         return true;
     }
     public function analyze($pl, &$rows) {
@@ -616,7 +618,7 @@ class TopicScorePaperColumn extends PaperColumn {
         global $Conf;
         if (!$Conf->has_topics() || !$pl->contact->isPC)
             return false;
-        $queryOptions["reviewer"] = $pl->reviewer ? $pl->reviewer : $pl->contact->cid;
+        $queryOptions["reviewer"] = $pl->reviewer_cid();
         $queryOptions["topicInterestScore"] = 1;
         return true;
     }
@@ -649,7 +651,7 @@ class PreferencePaperColumn extends PaperColumn {
         if (!$pl->contact->isPC)
             return false;
         $queryOptions["reviewerPreference"] = $queryOptions["topicInterestScore"] = 1;
-        $queryOptions["reviewer"] = $pl->reviewer ? $pl->reviewer : $pl->contact->cid;
+        $queryOptions["reviewer"] = $pl->reviewer_cid();
         if ($this->editable && $visible > 0) {
             $arg = "ajax=1&amp;setrevpref=1";
             if ($pl->contact->privChair && $pl->reviewer)
@@ -671,7 +673,7 @@ class PreferencePaperColumn extends PaperColumn {
     public function content($pl, $row) {
         $pref = unparse_preference($row);
         if ($pl->reviewer
-            && $pl->reviewer != $pl->contact->cid
+            && $pl->reviewer != $pl->contact->contactId
             && !$pl->contact->allowAdminister($row))
             return "N/A";
         else if (!$this->editable)
@@ -679,7 +681,7 @@ class PreferencePaperColumn extends PaperColumn {
         else if ($row->reviewerConflictType > 0)
             return "N/A";
         else
-            return "<input class='textlite' type='text' size='4' name='revpref$row->paperId' id='revpref$row->paperId' value=\"$pref\" tabindex='2' />";
+            return "<input type='text' size='4' name='revpref$row->paperId' id='revpref$row->paperId' value=\"$pref\" tabindex='2' />";
     }
     public function text($pl, $row) {
         return @($row->reviewerPreference + 0);
@@ -848,6 +850,7 @@ class TagPaperColumn extends PaperColumn {
     protected $dtag;
     protected $ctag;
     protected $editable = false;
+    static private $sortf_ctr = 0;
     public function __construct($name, $tag, $is_value) {
         parent::__construct($name, Column::VIEW_COLUMN, array("sorter" => "tag_sorter"));
         $this->dtag = $tag;
@@ -855,7 +858,7 @@ class TagPaperColumn extends PaperColumn {
         $this->cssname = ($this->is_value ? "tagval" : "tag");
     }
     public function make_field($name) {
-        $p = strpos($name, ":");
+        $p = strpos($name, ":") ? : strpos($name, "#");
         return parent::register(new TagPaperColumn($name, substr($name, $p + 1), $this->is_value));
     }
     public function prepare($pl, &$queryOptions, $visible) {
@@ -874,21 +877,25 @@ class TagPaperColumn extends PaperColumn {
         else
             return (int) substr($row->paperTags, $p + strlen($this->ctag));
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         global $Conf;
-        $this->ctag_sorter = $sorter = "_tag_sort_info." . $this->ctag;
+        $sorter->sortf = $sortf = "_tag_sort_info." . self::$sortf_ctr;
+        ++self::$sortf_ctr;
         $careful = !$pl->contact->privChair
             && $Conf->setting("tag_seeall") <= 0;
+        $unviewable = $empty = $sorter->reverse ? -2147483647 : 2147483647;
+        if ($this->editable)
+            $empty = $sorter->reverse ? -2147483646 : 2147483646;
         foreach ($rows as $row)
             if ($careful && !$pl->contact->canViewTags($row, true))
-                $row->$sorter = 2147483647;
-            else if (($row->$sorter = $this->_tag_value($row)) === null)
-                $row->$sorter = 2147483646 + !$this->editable;
+                $row->$sortf = $unviewable;
+            else if (($row->$sortf = $this->_tag_value($row)) === null)
+                $row->$sortf = $empty;
     }
-    public function tag_sorter($a, $b) {
-        $sorter = $this->ctag_sorter;
-        return $a->$sorter < $b->$sorter ? -1 :
-            ($a->$sorter == $b->$sorter ? 0 : 1);
+    public function tag_sorter($a, $b, $sorter) {
+        $sortf = $sorter->sortf;
+        return $a->$sortf < $b->$sortf ? -1 :
+            ($a->$sortf == $b->$sortf ? 0 : 1);
     }
     public function header($pl, $row, $ordinal) {
         return "#$this->dtag";
@@ -921,7 +928,7 @@ class EditTagPaperColumn extends TagPaperColumn {
         $this->editable = true;
     }
     public function make_field($name) {
-        $p = strpos($name, ":");
+        $p = strpos($name, ":") ? : strpos($name, "#");
         return parent::register(new EditTagPaperColumn($name, substr($name, $p + 1), $this->is_value));
     }
     public function prepare($pl, &$queryOptions, $visible) {
@@ -953,7 +960,7 @@ class EditTagPaperColumn extends TagPaperColumn {
             return "<input type='checkbox' class='cb' name='tag:$this->dtag $row->paperId' value='x' tabindex='6'"
                 . ($v !== null ? " checked='checked'" : "") . " />";
         else
-            return "<input type='text' class='textlite' size='4' name='tag:$this->dtag $row->paperId' value=\""
+            return "<input type='text' size='4' name='tag:$this->dtag $row->paperId' value=\""
                 . ($v !== null ? htmlspecialchars($v) : "") . "\" tabindex='6' />";
     }
 }
@@ -1005,7 +1012,7 @@ class ScorePaperColumn extends PaperColumn {
         }
         return true;
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         $scoreName = $this->score . "Scores";
         $view_score = $this->form_field->view_score;
         foreach ($rows as $row)
@@ -1052,11 +1059,14 @@ class ScorePaperColumn extends PaperColumn {
 
 class FormulaPaperColumn extends PaperColumn {
     private static $registered = array();
+    public static $list = array();
     public function __construct($name, $formula) {
         parent::__construct($name, Column::VIEW_COLUMN | Column::FOLDABLE,
                             array("minimal" => true, "sorter" => "formula_sorter"));
         $this->cssname = "formula";
         $this->formula = $formula;
+        if ($formula && @$formula->formulaId)
+            self::$list[$formula->formulaId] = $formula;
     }
     public static function lookup_all() {
         return self::$registered;
@@ -1093,7 +1103,7 @@ class FormulaPaperColumn extends PaperColumn {
         Formula::add_query_options($queryOptions, $expr, $pl->contact);
         return true;
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         $formulaf = $this->formula_function;
         $this->formula_sorter = $sorter = "_formula_sort_info." . $this->formula->name;
         foreach ($rows as $row)
@@ -1201,7 +1211,7 @@ class SearchSortPaperColumn extends PaperColumn {
         parent::__construct("searchsort", Column::VIEW_NONE,
                             array("sorter" => "search_sort_sorter"));
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         $sortInfo = array();
         foreach ($pl->search->numbered_papers() as $k => $v)
             if (!isset($sortInfo[$v]))
@@ -1227,7 +1237,7 @@ class TagOrderSortPaperColumn extends PaperColumn {
             $queryOptions["tagIndex"][] = $x->tag;
         return true;
     }
-    public function sort_prepare($pl, &$rows) {
+    public function sort_prepare($pl, &$rows, $sorter) {
         global $Conf;
         $careful = !$pl->contact->privChair
             && $Conf->setting("tag_seeall") <= 0;
@@ -1311,7 +1321,7 @@ class FoldAllPaperColumn extends PaperColumn {
 }
 
 function initialize_paper_columns() {
-    global $paperListFormulas, $reviewScoreNames, $Conf;
+    global $reviewScoreNames, $Conf;
 
     PaperColumn::register(new SelectorPaperColumn("sel", array("minimal" => true)));
     PaperColumn::register(new SelectorPaperColumn("selon", array("minimal" => true, "cssname" => "sel")));
@@ -1355,6 +1365,8 @@ function initialize_paper_columns() {
     PaperColumn::register_factory("tagval:", new TagPaperColumn(null, null, true));
     PaperColumn::register_factory("edittag:", new EditTagPaperColumn(null, null, false));
     PaperColumn::register_factory("edittagval:", new EditTagPaperColumn(null, null, true));
+    PaperColumn::register_factory("#", new TagPaperColumn(null, null, false));
+    PaperColumn::register_factory("edit#", new EditTagPaperColumn(null, null, true));
 
     $rf = reviewForm();
     $score = null;
@@ -1366,15 +1378,13 @@ function initialize_paper_columns() {
     if ($score)
         PaperColumn::register_factory("", $score);
 
-    $paperListFormulas = array();
-    if ($Conf && $Conf->setting("formulas") && $Conf->sversion >= 32) {
+    if ($Conf && $Conf->setting("formulas")) {
         $result = $Conf->q("select * from Formula order by lower(name)");
         $formula = null;
         while (($row = edb_orow($result))) {
             $fid = $row->formulaId;
             $formula = new FormulaPaperColumn("formula$fid", $row);
             FormulaPaperColumn::register($formula);
-            $paperListFormulas[$fid] = $row;
         }
         if (!$formula)
             $formula = new FormulaPaperColumn("", null);

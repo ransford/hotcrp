@@ -81,24 +81,20 @@ class PaperList extends BaseList {
         if (($thenmap = $this->search->thenmap)) {
             foreach ($rows as $row)
                 $row->_then_sort_info = $thenmap[$row->paperId];
-            $code .= "\$x = \$x ? \$x : \$a->_then_sort_info - \$b->_then_sort_info;\n";
+            $code .= "if ((\$x = \$a->_then_sort_info - \$b->_then_sort_info)) return \$x < 0 ? -1 : 1;\n";
         }
 
-        $magic_sort_info = array();
-        foreach ($this->sorters as $s) {
-            $magic_sort_info[] = $s->field;
-            $s->field->sort_prepare($this, $rows);
-            $rev = ($s->reverse && count($magic_sort_info) > 1 ? "-" : "");
-            $code .= "\$x = \$x ? \$x : $rev\$magic_sort_info["
-                . (count($magic_sort_info) - 1) . "]->"
-                . $s->field->sorter . "(\$a, \$b);\n";
+        $magic_sort_info = $this->sorters;
+        foreach ($this->sorters as $i => $s) {
+            $s->field->sort_prepare($this, $rows, $s);
+            $rev = ($s->reverse ? "-" : "");
+            $code .= "if (!\$x) { \$s = \$magic_sort_info[$i]; "
+                . "\$x = $rev\$s->field->" . $s->field->sorter
+                . "(\$a, \$b, \$s); }\n";
         }
 
-        $code .= "\$x = \$x ? \$x : \$a->paperId - \$b->paperId;\n";
-        if ($this->sorters[0]->reverse)
-            $code .= "return \$x > 0 ? -1 : (\$x == 0 ? 0 : 1);\n";
-        else
-            $code .= "return \$x < 0 ? -1 : (\$x == 0 ? 0 : 1);\n";
+        $code .= "if (!\$x) \$x = \$a->paperId - \$b->paperId;\n";
+        $code .= "return \$x < 0 ? -1 : (\$x == 0 ? 0 : 1);\n";
 
         usort($rows, create_function("\$a, \$b", $code));
         unset($magic_sort_info);
@@ -182,7 +178,8 @@ class PaperList extends BaseList {
                 if ($row->reviewSubmitted > 0)
                     $pl .= "&amp;m=r";
             }
-        }
+        } else if ($pt === "review")
+            $pt = "paper";
         $pl .= $this->_paper_link_args;
         if ($doreview && $row->reviewSubmitted > 0)
             $pl .= "#review" . $rord;
@@ -201,6 +198,10 @@ class PaperList extends BaseList {
 
     static function wrapChairConflict($text) {
         return "<span class='fn5'><em>Hidden for conflict</em> &nbsp;<span class='barsep'>|</span>&nbsp; <a href=\"javascript:void fold('pl',0,'force')\">Override conflicts</a></span><span class='fx5'>$text</span>";
+    }
+
+    public function reviewer_cid() {
+        return $this->reviewer ? : $this->contact->contactId;
     }
 
     public function maybeConflict($row, $text, $visible) {
@@ -335,6 +336,8 @@ class PaperList extends BaseList {
                 $sel_opt["rev"] = "All reviews";
                 $sel_opt["revz"] = "All reviews (zip)";
             }
+            if ($this->contact->privChair)
+                $sel_opt["pcassignments"] = "PC assignments";
         }
         if ($this->contact->privChair)
             $sel_opt["authors"] = "Authors &amp; contacts";
@@ -379,7 +382,7 @@ class PaperList extends BaseList {
                 $whichlll = $nlll;
             $t .= $barsep;
             $t .= "<td class='lll$nlll nowrap'><a href=\"" . selfHref(array("atab" => "setpref")) . "#plact\" onclick='return crpfocus(\"plact\",$nlll)'>Set preferences</a></td><td class='lld$nlll nowrap'><b>:</b> &nbsp;";
-            $t .= "<input id='plact${nlll}_d' class='textlite' type='text' name='paprevpref' value='' size='4' tabindex='6' onfocus='autosub(\"setpaprevpref\",this)' />"
+            $t .= "<input id='plact${nlll}_d' type='text' name='paprevpref' value='' size='4' tabindex='6' onfocus='autosub(\"setpaprevpref\",this)' />"
                 . " &nbsp;" . Ht::submit("setpaprevpref", "Go", array("tabindex" => 6)) . "</td>";
             $nlll++;
         }
@@ -406,7 +409,7 @@ class PaperList extends BaseList {
                     . Ht::img("_.gif", "More...", "expander")
                     . "</a>&nbsp;</span></td><td>";
             }
-            $t .= "tag<span class='fn99'>(s)</span> &nbsp;<input id='plact${nlll}_d' class='textlite' type='text' name='tag' value=\"" . htmlspecialchars(defval($_REQUEST, "tag", "")) . "\"' size='15' onfocus='autosub(\"tagact\",this)' /> &nbsp;"
+            $t .= "tag<span class='fn99'>(s)</span> &nbsp;<input id='plact${nlll}_d' type='text' name='tag' value=\"" . htmlspecialchars(defval($_REQUEST, "tag", "")) . "\"' size='15' onfocus='autosub(\"tagact\",this)' /> &nbsp;"
                 . Ht::submit("tagact", "Go");
             if ($this->contact->privChair) {
                 $t .= "<div class='fx'><div style='margin:2px 0'>"
@@ -415,7 +418,7 @@ class PaperList extends BaseList {
                     . "<div style='margin:2px 0'>Using: &nbsp;"
                     . Ht::select("tagcr_method", PaperRank::methods(), defval($_REQUEST, "tagcr_method"))
                     . "</div>"
-                    . "<div style='margin:2px 0'>Source tag: &nbsp;~<input class='textlite' type='text' name='tagcr_source' value=\"" . htmlspecialchars(defval($_REQUEST, "tagcr_source", "")) . "\" size='15' /></div>"
+                    . "<div style='margin:2px 0'>Source tag: &nbsp;~<input type='text' name='tagcr_source' value=\"" . htmlspecialchars(defval($_REQUEST, "tagcr_source", "")) . "\" size='15' /></div>"
                     . "</div>";
             }
             $t .= "</td></tr></table></td>";
@@ -593,8 +596,7 @@ class PaperList extends BaseList {
 
     private function _addAjaxLoadForm($pap, $extra = "") {
         global $Conf;
-        $t = "<div><form id='plloadform' method='post' action='" . hoturl_post("search", "ajax=1" . $this->_paper_link_args) . "' accept-charset='UTF-8'>"
-            . "<div class='inform'>";
+        $t = "<div>" . Ht::form_div(hoturl_post("search", "ajax=1" . $this->_paper_link_args), array("id" => "plloadform"));
         $s = $this->search;
         if ($s->q)
             $t .= Ht::hidden("q", $s->q);
@@ -1000,8 +1002,8 @@ class PaperList extends BaseList {
                     } else if ($s->type) {
                         if ($this->contact->canViewTags(null)
                             && ($tagger = new Tagger)
-                            && $tagger->check($s->type)
-                            && ($result = $Conf->qe("select paperId from PaperTag where tag='" . sqlq($s->type) . "' limit 1"))
+                            && ($tag = $tagger->check($s->type))
+                            && ($result = $Conf->qe("select paperId from PaperTag where tag='" . sqlq($tag) . "' limit 1"))
                             && edb_nrows($result))
                             $this->search->warn("Unrecognized sort “" . htmlspecialchars($s->type) . "”. Did you mean “sort:#" . htmlspecialchars($s->type) . "”?");
                         else
@@ -1074,7 +1076,7 @@ class PaperList extends BaseList {
         } else if (count($rows) == 0) {
             if (($altq = $this->search->alternate_query())) {
                 $altqh = htmlspecialchars($altq);
-                $url = $this->search->url_site_relative($altq);
+                $url = $this->search->url_site_relative_raw($altq);
                 if (substr($url, 0, 5) == "search")
                     $altqh = "<a href=\"" . $ConfSiteBase . htmlspecialchars($url) . "\">" . $altqh . "</a>";
                 return "No matching papers. Did you mean “${altqh}”?";
@@ -1134,7 +1136,7 @@ class PaperList extends BaseList {
         }
 
         // header cells
-        $url = $this->search->url_site_relative();
+        $url = $this->search->url_site_relative_raw();
         if (!defval($options, "noheader")) {
             $colhead .= " <thead>\n  <tr class=\"pl_headrow\">\n";
             $ord = 0;
@@ -1176,7 +1178,7 @@ class PaperList extends BaseList {
                           || $fdef->name == "edit" . $this->sorters[0]->type)
                          && $sortUrl)
                         || $defsortname == $this->sorters[0]->type))
-                    $colhead .= '<a class="pl_sort_def' . ($this->sorters[0]->reverse ? "_rev" : "") . '" rel="nofollow" title="Reverse sort" href="' . $sortUrl . urlencode($this->sorters[0]->type . "," . ($this->sorters[0]->reverse ? "n" : "r")) . '">' . $ftext . "</a>";
+                    $colhead .= '<a class="pl_sort_def' . ($this->sorters[0]->reverse ? "_rev" : "") . '" rel="nofollow" title="Reverse sort" href="' . $sortUrl . urlencode($this->sorters[0]->type . ($this->sorters[0]->reverse ? "" : " reverse")) . '">' . $ftext . "</a>";
                 else if ($fdef->sorter && $sortUrl)
                     $colhead .= $q . urlencode($fdef->name) . "\">" . $ftext . "</a>";
                 else if ($defsortname)

@@ -11,14 +11,14 @@ $MergeError = "";
 function crpmergeone($table, $field, $oldid, $newid) {
     global $Conf, $MergeError;
     if (!$Conf->q("update $table set $field=$newid where $field=$oldid"))
-        $MergeError .= $Conf->db_error_html(true, "", 0);
+        $MergeError .= $Conf->db_error_html(true);
 }
 
 function crpmergeoneignore($table, $field, $oldid, $newid) {
     global $Conf, $MergeError;
     if (!$Conf->q("update ignore $table set $field=$newid where $field=$oldid")
         && !$Conf->q("delete from $table where $field=$oldid"))
-        $MergeError .= $Conf->db_error_html(true, "", 0);
+        $MergeError .= $Conf->db_error_html(true);
 }
 
 if (isset($_REQUEST["merge"]) && check_post()) {
@@ -41,10 +41,14 @@ if (isset($_REQUEST["merge"]) && check_post()) {
                 $mm = $Me;
                 $Me = $MiniMe;
                 $MiniMe = $mm;
-                $_SESSION["user"] = "$Me->contactId $Conf->dsn $Me->email";
+                $_SESSION["trueuser"]->contactId = $Me->contactId;
+                $_SESSION["trueuser"]->dsn = $Conf->dsn;
+                $_SESSION["trueuser"]->email = $Me->email;
             }
 
-            Mailer::send("@mergeaccount", null, $MiniMe, $Me, array("cc" => Text::user_email_to($Me)));
+            Mailer::send("@mergeaccount", null, $MiniMe,
+                         array("cc" => Text::user_email_to($Me),
+                               "other_contact" => $Me));
 
             // Now, scan through all the tables that possibly
             // specify a contactID and change it from their 2nd
@@ -93,7 +97,7 @@ if (isset($_REQUEST["merge"]) && check_post()) {
             while (($row = edb_row($result))) {
                 $fields = ReviewForm::reviewArchiveFields();
                 if (!$Conf->q("insert into PaperReviewArchive ($fields) select $fields from PaperReview where reviewId=$row[0]"))
-                    $MergeError .= $Conf->db_error_html(true, "", 0);
+                    $MergeError .= $Conf->db_error_html(true);
             }
             crpmergeoneignore("PaperReview", "contactId", $oldid, $newid);
             crpmergeone("PaperReview", "requestedBy", $oldid, $newid);
@@ -109,9 +113,9 @@ if (isset($_REQUEST["merge"]) && check_post()) {
             // Remove the old contact record
             if ($MergeError == "") {
                 if (!$Conf->q("delete from ContactInfo where contactId=$oldid"))
-                    $MergeError .= $Conf->db_error_html($result, "", 0);
+                    $MergeError .= $Conf->db_error_html(true);
                 if (!$Conf->q("delete from ContactAddress where contactId=$oldid"))
-                    $MergeError .= $Conf->db_error_html($result, "", 0);
+                    $MergeError .= $Conf->db_error_html(true);
             }
 
             $Conf->qe("unlock tables");
@@ -126,7 +130,7 @@ if (isset($_REQUEST["merge"]) && check_post()) {
                 go(hoturl("index"));
             } else {
                 $Me->log_activity("Merged account $MiniMe->email with errors");
-                $MergeError .= $Conf->db_error_html(null);
+                $MergeError .= $Conf->db_error_html(true);
             }
         }
     }
@@ -159,14 +163,14 @@ echo Ht::hidden("actas", $Me->contactId);
 
 <tr>
   <td class='caption initial'>Email</td>
-  <td class='entry'><input type='text' class='textlite' name='email' size='50'
+  <td class='entry'><input type='text' name='email' size='50'
     <?php if (isset($_REQUEST["email"])) echo "value=\"", htmlspecialchars($_REQUEST["email"]), "\" "; ?>
   /></td>
 </tr>
 
 <tr>
   <td class='caption'>Password</td>
-  <td class='entry'><input type='password' class='textlite' name='password' size='50' /></td>
+  <td class='entry'><input type='password' name='password' size='50' /></td>
 </tr>
 
 <tr>

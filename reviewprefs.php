@@ -5,9 +5,9 @@
 
 require_once("src/initweb.php");
 require_once("src/papersearch.php");
-if ($Me->is_empty() || (!$Me->privChair && !$Me->isPC))
+if (!$Me->privChair && !$Me->isPC)
     $Me->escape();
-$reviewer = rcvtint($_REQUEST["reviewer"]);
+$reviewer = cvtint(@$_REQUEST["reviewer"]);
 if ($reviewer <= 0 || !$Me->privChair)
     $reviewer = $Me->contactId;
 
@@ -78,20 +78,18 @@ if (isset($_REQUEST["update"]) && check_post())
 
 
 // Select papers
-if (isset($_REQUEST["setpaprevpref"]) || isset($_REQUEST["get"])) {
-    PaperSearch::parsePapersel();
-    if (!isset($papersel))
-        $Conf->errorMsg("No papers selected.");
-}
-PaperSearch::clearPaperselRequest();
+if ((isset($_REQUEST["setpaprevpref"]) || isset($_REQUEST["get"]))
+    && !SearchActions::parse_requested_selection($Me))
+    $Conf->errorMsg("No papers selected.");
+SearchActions::clear_requested_selection();
 
 
 // Set multiple paper preferences
-if (isset($_REQUEST["setpaprevpref"]) && isset($papersel) && check_post()) {
+if (isset($_REQUEST["setpaprevpref"]) && SearchActions::any() && check_post()) {
     if (!parse_preference($_REQUEST["paprevpref"]))
         $Conf->errorMsg("Preferences must be small positive or negative integers.");
     else {
-        foreach ($papersel as $p)
+        foreach (SearchActions::selection() as $p)
             $_REQUEST["revpref$p"] = $_REQUEST["paprevpref"];
         savePreferences($reviewer);
     }
@@ -143,7 +141,7 @@ else if (isset($_REQUEST["upload"]))
 
 
 // Search actions
-if (isset($_REQUEST["get"]) && isset($papersel)) {
+if (isset($_REQUEST["get"]) && SearchActions::any()) {
     include("search.php");
     exit;
 }
@@ -168,7 +166,7 @@ $Conf->infoMsg($Conf->message_html("revprefdescription"));
 
 // search
 $search = new PaperSearch($Me, array("t" => "rable",
-                                     "urlbase" => hoturl_site_relative("reviewprefs", "reviewer=$reviewer"),
+                                     "urlbase" => hoturl_site_relative_raw("reviewprefs", "reviewer=$reviewer"),
                                      "q" => defval($_REQUEST, "q", ""),
                                      "reviewer" => $reviewer));
 $pl = new PaperList($search, array("sort" => true, "list" => true, "foldtype" => "pf", "reviewer" => $reviewer));
@@ -186,9 +184,9 @@ echo "<table id='searchform' class='tablinks1'>
 $showing_au = (!$Conf->subBlindAlways() && strpos($pldisplay, " au ") !== false);
 $showing_anonau = ((!$Conf->subBlindNever() || $Me->privChair) && strpos($pldisplay, " anonau ") !== false);
 
-echo "<form method='get' action='", hoturl("reviewprefs"), "' accept-charset='UTF-8' id='redisplayform' class='",
-    ($showing_au || ($showing_anonau && $Conf->subBlindAlways()) ? "fold10o" : "fold10c"),
-    "'>\n<table>";
+echo Ht::form_div(hoturl("reviewprefs"), array("method" => "get", "id" => "redisplayform",
+                                               "class" => ($showing_au || ($showing_anonau && $Conf->subBlindAlways()) ? "fold10o" : "fold10c"))),
+    "<table>";
 
 if ($Me->privChair) {
     echo "<tr><td class='lxcaption'><strong>Preferences:</strong> &nbsp;</td><td class='lentry'>";
@@ -209,7 +207,7 @@ if ($Me->privChair) {
         "<div class='g'></div></td></tr>\n";
 }
 
-echo "<tr><td class='lxcaption'><strong>Search:</strong></td><td class='lentry'><input class='textlite' type='text' size='32' name='q' value=\"", htmlspecialchars(defval($_REQUEST, "q", "")), "\" /><span class='sep'></span></td>",
+echo "<tr><td class='lxcaption'><strong>Search:</strong></td><td class='lentry'><input type='text' size='32' name='q' value=\"", htmlspecialchars(defval($_REQUEST, "q", "")), "\" /><span class='sep'></span></td>",
     "<td>", Ht::submit("redisplay", "Redisplay"), "</td>",
     "</tr>\n";
 
@@ -265,14 +263,12 @@ if ($pl->any->topics) {
 }
 if ($loadforms)
      echo "<br />", $loadforms;
-echo "</td></tr>\n</table></form>"; // </div></div>
+echo "</td></tr>\n</table></div></form>"; // </div></div>
 echo "</td></tr></table>\n";
 
 
 // main form
-echo "<form class='assignpc' method='post' action=\"", hoturl_post("reviewprefs", "reviewer=$reviewer" . (defval($_REQUEST, "q") ? "&amp;q=" . urlencode($_REQUEST["q"]) : "")),
-    "\" enctype='multipart/form-data' accept-charset='UTF-8'>",
-    "<div class='inform'>",
+echo Ht::form_div(hoturl_post("reviewprefs", "reviewer=$reviewer" . (defval($_REQUEST, "q") ? "&amp;q=" . urlencode($_REQUEST["q"]) : "")), array("class" => "assignpc")),
     Ht::hidden("defaultact", "", array("id" => "defaultact")),
     Ht::hidden_default_submit("default", 1),
     "<div class='pltable_full_ctr'>\n",

@@ -30,12 +30,12 @@ if (isset($_REQUEST["uploadForm"])
     $tf = $rf->beginTextForm($_FILES['uploadedFile']['tmp_name'], $_FILES['uploadedFile']['name']);
     while (($req = $rf->parseTextForm($tf))) {
 	if (($prow = $Conf->paperRow($req['paperId'], $Me, $whyNot))
-	    && $Me->canSubmitReview($prow, null, $whyNot)) {
+	    && $Me->can_submit_review($prow, null, $whyNot)) {
 	    $rrow = $Conf->reviewRow(array("paperId" => $prow->paperId, "contactId" => $Me->contactId,
 					   "rev_tokens" => $Me->review_tokens(),
 					   "first" => true));
 	    if ($rf->checkRequestFields($req, $rrow, $tf))
-		$rf->saveRequest($req, $rrow, $prow, $Me, $tf);
+		$rf->save_review($req, $rrow, $prow, $Me, $tf);
 	} else
 	    $rf->tfError($tf, true, whyNotText($whyNot, "review"));
     }
@@ -162,21 +162,21 @@ if ((isset($_REQUEST["setvote"]) || isset($_REQUEST["setrank"]))
     setTagIndexes();
 
 
-$pastDeadline = !$Conf->time_review($Me->isPC, true);
+$pastDeadline = !$Conf->time_review(null, $Me->isPC, true);
 
-if ($pastDeadline && !$Conf->deadlinesAfter("rev_open") && !$Me->privChair) {
+if (!$Conf->time_review_open() && !$Me->privChair) {
     $Conf->errorMsg("The site is not open for review.");
     go(hoturl("index"));
 }
 
-$Conf->header("Offline Reviewing", 'offrev', actionBar());
+$Conf->header("Offline Reviewing", "offline", actionBar());
 
 if ($Me->is_reviewer()) {
-    if ($pastDeadline && !$Conf->deadlinesAfter("rev_open"))
+    if (!$Conf->time_review_open())
 	$Conf->infoMsg("The site is not open for review.");
-    else if ($pastDeadline)
-	$Conf->infoMsg("The <a href='" . hoturl("deadlines") . "'>deadline</a> for submitting reviews has passed.");
     $Conf->infoMsg("Use this page to download a blank review form, or to upload review forms you’ve already filled out.");
+    if (!$Me->can_clickthrough("review"))
+        PaperTable::echo_review_clickthrough();
 } else
     $Conf->infoMsg("You aren’t registered as a reviewer or PC member for this conference, but for your information, you may download the review form anyway.");
 
@@ -197,8 +197,8 @@ if ($Me->is_reviewer()) {
 echo "</td>\n";
 if ($Me->is_reviewer()) {
     $disabled = ($pastDeadline && !$Me->privChair ? " disabled='disabled'" : "");
-    echo "<td><h3>Upload filled-out forms</h3>
-<form action='", hoturl_post("offline", "uploadForm=1"), "' method='post' enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>",
+    echo "<td><h3>Upload filled-out forms</h3>\n",
+        Ht::form_div(hoturl_post("offline", "uploadForm=1")),
         Ht::hidden("postnonempty", 1),
         "<input type='file' name='uploadedFile' accept='text/plain' size='30' $disabled/>&nbsp; ",
         Ht::submit("Go", array("disabled" => !!$disabled));
@@ -221,8 +221,8 @@ if ($Conf->setting("tag_rank") && $Me->is_reviewer()) {
     echo "</div></td>\n";
 
     $disabled = ($pastDeadline && !$Me->privChair ? " disabled='disabled'" : "");
-    echo "<td><h3>Upload ranking file</h3>
-<form action='", hoturl_post("offline", "setrank=1&amp;tag=%7E$ranktag"), "' method='post' enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>",
+    echo "<td><h3>Upload ranking file</h3>\n",
+        Ht::form_div(hoturl_post("offline", "setrank=1&amp;tag=%7E$ranktag")),
         Ht::hidden("upload", 1),
         "<input type='file' name='file' accept='text/plain' size='30' $disabled/>&nbsp; ",
         Ht::submit("Go", array("disabled" => !!$disabled));

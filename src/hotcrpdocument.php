@@ -36,6 +36,20 @@ class HotCRPDocument {
             return null;
     }
 
+    public static function parse_dtype($dname) {
+        if (preg_match('/\A-?\d+\z/', $dname))
+            return (int) $dname;
+        $dname = strtolower($dname);
+        if ($dname === "paper" || $dname === "submission")
+            return DTYPE_SUBMISSION;
+        if ($dname === "final")
+            return DTYPE_FINAL;
+        $omatches = PaperOption::search($dname);
+        if (count($omatches) == 1)
+            return current($omatches)->id;
+        return null;
+    }
+
     public static function filename($doc) {
         global $Opt;
         $fn = $Opt["downloadPrefix"];
@@ -152,13 +166,13 @@ class HotCRPDocument {
                          "documentType" => $doc->documentType);
         if (!@$Opt["dbNoPapers"])
             $columns["paper"] = $doc->content;
-        if ($Conf->sversion >= 45 && @$doc->filename)
+        if (@$doc->filename)
             $columns["filename"] = $doc->filename;
-        if ($Conf->sversion >= 55 && is_string(@$doc->infoJson))
+        if (is_string(@$doc->infoJson))
             $columns["infoJson"] = $doc->infoJson;
-        else if ($Conf->sversion >= 55 && is_object(@$doc->infoJson))
+        else if (is_object(@$doc->infoJson))
             $columns["infoJson"] = json_encode($doc->infoJson);
-        else if ($Conf->sversion >= 55 && is_object(@$doc->metadata))
+        else if (is_object(@$doc->metadata))
             $columns["infoJson"] = json_encode($doc->metadata);
         if ($Conf->sversion >= 74 && @$doc->size)
             $columns["size"] = $doc->size;
@@ -212,7 +226,8 @@ class HotCRPDocument {
             $ok = true;
         }
 
-        if (!$ok && ($s3 = self::s3_document())) {
+        if (!$ok && ($s3 = self::s3_document())
+            && ($filename = self::s3_filename($doc))) {
             $filename = self::s3_filename($doc);
             $content = $s3->load($filename);
             if ($content !== "" && $content !== null) {

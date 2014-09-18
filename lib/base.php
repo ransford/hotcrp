@@ -94,3 +94,35 @@ function defval($var, $idx, $defval = null) {
     else
 	return (isset($var->$idx) ? $var->$idx : $defval);
 }
+
+function is_associative_array($a) {
+    // this method is suprisingly fast
+    return is_array($a) && array_values($a) !== $a;
+}
+
+function array_to_object_recursive($a) {
+    $o = (object) array();
+    foreach ($a as $k => $v)
+        if ($k === "")
+            /* skip */;
+        else if (is_associative_array($v))
+            $o->$k = array_to_object_recursive($v);
+        else
+            $o->$k = $v;
+    return $o;
+}
+
+
+// debug helpers
+
+function caller_landmark($position = 1, $skipfunction_re = null) {
+    $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+    while ($skipfunction_re && isset($trace[$position + 1])) {
+        $fname = (string) @$trace[$position + 1]["class"];
+        $fname .= ($fname ? "::" : "") . $trace[$position + 1]["function"];
+        if (!preg_match($skipfunction_re, $fname))
+            break;
+        ++$position;
+    }
+    return $trace[$position]["file"] . ":" . $trace[$position]["line"] . ":" . $trace[$position]["function"];
+}

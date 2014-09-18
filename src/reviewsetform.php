@@ -79,7 +79,7 @@ function rf_update() {
         if (@$_REQUEST["removed_$fid"] == "1")
             $pos = 0;
         else
-            $pos = rcvtint($_REQUEST["order_$fid"]);
+            $pos = cvtint(@$_REQUEST["order_$fid"]);
         if ($pos > 0 && $sn == ""
             && trim(defval($_REQUEST, "description_$fid", "")) == ""
             && trim(defval($_REQUEST, "options_$fid", "")) == "")
@@ -122,8 +122,8 @@ function rf_update() {
         $Conf->save_setting("review_form", 1, $nrfj);
         foreach ($nrfj as $fid => $fj)
             if (@$fj->position && @$fj->options) {
-                $result = $Conf->qe("update PaperReview set $fid=0 where $fid>" . count($fj->options));
-                if (edb_nrows_affected($result) > 0)
+                $result = Dbl::real_qe("update PaperReview set $fid=0 where $fid>" . count($fj->options));
+                if ($result && $result->affected_rows > 0)
                     $scoreModified[] = htmlspecialchars($fj->name);
             }
         foreach ($rf->fmap as $fid => $f) {
@@ -162,7 +162,7 @@ function rf_show() {
          . '<div id="revfield_$" class="f-contain foldo errloc_$">'
          . '<div class="f-i errloc_shortName_$">'
          .   '<div class="f-c">Field name</div>'
-         .   Ht::entry('shortName_$', "", array("size" => 50, "class" => "textlite", "style" => "font-weight:bold", "id" => 'shortName_$'))
+         .   Ht::entry('shortName_$', "", array("size" => 50, "style" => "font-weight:bold", "id" => 'shortName_$'))
          . '</div>'
          . '<div class="f-i fx">'
          . '<div class="f-ix">'
@@ -172,7 +172,7 @@ function rf_show() {
          . '</div><div class="f-ix">'
          .   '<div class="f-c">Visibility</div>'
          .   Ht::select('authorView_$', array("author" => "Authors &amp; reviewers", "pc" => "Reviewers only", "admin" => "Administrators only"), array("class" => "reviewfield_authorView", "id" => 'authorView_$'))
-         . '</div><div class="clear"></div></div>'
+         . '</div><hr class="c" /></div>'
          . '<div class="f-i errloc_description_$ fx">'
          .   '<div class="f-c">Description</div>'
          .   Ht::textarea('description_$', null, array("class" => "reviewtext", "rows" => 6, "id" => 'description_$'))

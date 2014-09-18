@@ -20,7 +20,7 @@ if (isset($_REQUEST["email"]) && isset($_REQUEST["password"])
     foreach (array("p", "r", "c", "accept", "refuse", "decline") as $opt)
         if (isset($_REQUEST[$opt]))
             $after .= ($after === "" ? "" : "&") . $opt . "=" . urlencode($_REQUEST[$opt]);
-    $url = hoturl_site_relative("review", $after);
+    $url = hoturl_site_relative_raw("review", $after);
     go(hoturl("index", "email=" . urlencode($_REQUEST["email"]) . "&password=" . urlencode($_REQUEST["password"]) . "&go=" . urlencode($url)));
 }
 
@@ -28,9 +28,9 @@ if ($Me->is_empty())
     $Me->escape();
 $rf = reviewForm();
 $useRequest = isset($_REQUEST["after_login"]);
-if (defval($_REQUEST, "mode") == "edit")
+if (@$_REQUEST["mode"] == "edit")
     $_REQUEST["mode"] = "re";
-else if (defval($_REQUEST, "mode") == "view")
+else if (@$_REQUEST["mode"] == "view")
     $_REQUEST["mode"] = "r";
 
 
@@ -41,7 +41,7 @@ function confHeader() {
         $title = "Paper #$prow->paperId";
     else
         $title = "Paper Reviews";
-    $Conf->header($title, "review", actionBar("r", $prow), false);
+    $Conf->header($title, "review", actionBar(@$_REQUEST["mode"], $prow), false);
 }
 
 function errorMsgExit($msg) {
@@ -79,7 +79,7 @@ else if (isset($_REQUEST["post"]) && isset($_REQUEST["default"])) {
         $_REQUEST["uploadForm"] = 1;
     else
         $_REQUEST["update"] = 1;
-} else if (isset($_REQUEST["submit"]))
+} else if (isset($_REQUEST["submitreview"]))
     $_REQUEST["update"] = $_REQUEST["ready"] = 1;
 else if (isset($_REQUEST["savedraft"])) {
     $_REQUEST["update"] = 1;
@@ -98,12 +98,12 @@ if (isset($_REQUEST["uploadForm"])
         /* error already reported */;
     else if (isset($req['paperId']) && $req['paperId'] != $prow->paperId)
         $rf->tfError($tf, true, "This review form is for paper #" . $req['paperId'] . ", not paper #$prow->paperId; did you mean to upload it here?  I have ignored the form.<br /><a class='button_small' href='" . hoturl("review", "p=" . $req['paperId']) . "'>Review paper #" . $req['paperId'] . "</a> <a class='button_small' href='" . hoturl("offline") . "'>General review upload site</a>");
-    else if (!$Me->canSubmitReview($prow, $paperTable->editrrow, $whyNot))
+    else if (!$Me->can_submit_review($prow, $paperTable->editrrow, $whyNot))
         $rf->tfError($tf, true, whyNotText($whyNot, "review"));
     else {
         $req['paperId'] = $prow->paperId;
         if ($rf->checkRequestFields($req, $paperTable->editrrow, $tf)) {
-            if ($rf->saveRequest($req, $paperTable->editrrow, $prow, $Me))
+            if ($rf->save_review($req, $paperTable->editrrow, $prow, $Me))
                 $tf['confirm'][] = "Uploaded review for paper #$prow->paperId.";
         }
     }
@@ -118,7 +118,7 @@ if (isset($_REQUEST["uploadForm"])
 
 
 // check review submit requirements
-if (isset($_REQUEST["unsubmit"]) && $paperTable->editrrow
+if (isset($_REQUEST["unsubmitreview"]) && $paperTable->editrrow
     && $paperTable->editrrow->reviewSubmitted && $Me->canAdminister($prow)
     && check_post()) {
     $Conf->qe("lock tables PaperReview write");
@@ -170,11 +170,11 @@ if (isset($_REQUEST["rating"]) && $paperTable->rrow && check_post()) {
 
 // update review action
 if (isset($_REQUEST["update"]) && check_post()) {
-    if (!$Me->canSubmitReview($prow, $paperTable->editrrow, $whyNot)) {
+    if (!$Me->can_submit_review($prow, $paperTable->editrrow, $whyNot)) {
         $Conf->errorMsg(whyNotText($whyNot, "review"));
         $useRequest = true;
     } else if ($rf->checkRequestFields($_REQUEST, $paperTable->editrrow)) {
-        if ($rf->saveRequest($_REQUEST, $paperTable->editrrow, $prow, $Me)) {
+        if ($rf->save_review($_REQUEST, $paperTable->editrrow, $prow, $Me)) {
             if ((@$_REQUEST["ready"] && !@$_REQUEST["unready"])
                 || ($paperTable->editrrow && $paperTable->editrrow->reviewSubmitted))
                 $Conf->confirmMsg("Review submitted.");
@@ -190,7 +190,8 @@ if (isset($_REQUEST["update"]) && check_post()) {
 
 
 // delete review action
-if (isset($_REQUEST["delete"]) && $Me->canAdminister($prow) && check_post())
+if (isset($_REQUEST["deletereview"]) && check_post()
+    && $Me->canAdminister($prow))
     if (!$paperTable->editrrow)
         $Conf->errorMsg("No review to delete.");
     else {
@@ -212,6 +213,7 @@ if (isset($_REQUEST["delete"]) && $Me->canAdminister($prow) && check_post())
             unset($_REQUEST["reviewId"]);
             unset($_REQUEST["r"]);
             $_REQUEST["paperId"] = $paperTable->editrrow->paperId;
+            go(hoturl("paper", array("p" => $_REQUEST["paperId"], "ls" => @$_REQUEST["ls"])));
         }
         redirectSelf();         // normally does not return
         loadRows();
@@ -295,7 +297,7 @@ function refuseReview() {
     $reason = defval($_REQUEST, "reason", "");
     if ($reason == "Optional explanation")
         $reason = "";
-    $result = $Conf->qe("insert into PaperReviewRefused (paperId, contactId, requestedBy, reason) values ($rrow->paperId, $rrow->contactId, $rrow->requestedBy, '" . sqlqtrim($reason) . "')");
+    $result = $Conf->qe("insert into PaperReviewRefused (paperId, contactId, requestedBy, reason) values ($rrow->paperId, $rrow->contactId, $rrow->requestedBy, '" . sqlq(trim($reason)) . "')");
     if (!$result)
         return;
 
@@ -309,9 +311,11 @@ function refuseReview() {
     $Conf->qe("unlock tables");
 
     // send confirmation email
-    $Requester = Contact::find_by_id($rrow->reqContactId);
-    $reqprow = $Conf->paperRow($prow->paperId, $rrow->reqContactId);
-    Mailer::send("@refusereviewrequest", $reqprow, $Requester, $rrow, array("reason" => $reason));
+    $Requester = Contact::find_by_id($rrow->requestedBy);
+    $reqprow = $Conf->paperRow($prow->paperId, $rrow->requestedBy);
+    Mailer::send("@refusereviewrequest", $reqprow, $Requester,
+                 array("reviewer_contact" => $rrow,
+                       "reason" => $reason));
 
     // confirmation message
     $Conf->confirmMsg("The request that you review paper #$prow->paperId has been removed.  Mail was sent to the person who originally requested the review.");
@@ -361,6 +365,8 @@ if (isset($_REQUEST["accept"])) {
 
 
 // paper actions
+if (isset($_REQUEST["clickthrough"]) && check_post())
+    PaperActions::save_clickthrough();
 if (isset($_REQUEST["setdecision"]) && check_post()) {
     PaperActions::setDecision($prow);
     loadRows();

@@ -11,16 +11,23 @@ class Ht {
     private static $_stash = "";
     private static $_stash_inscript = false;
     private static $_stash_map = array();
+    private static $_bad_js = array("accept-charset" => true,
+                                    "action" => true,
+                                    "enctype" => true,
+                                    "method" => true,
+                                    "name" => true,
+                                    "optionstyles" => true,
+                                    "type" => true,
+                                    "value" => true);
 
     static function extra($js) {
         $x = "";
         if ($js) {
-            foreach (array("id", "tabindex", "onchange", "onclick", "onfocus",
-                           "onblur", "onsubmit", "class", "style", "size",
-                           "title", "rows", "cols", "autocomplete") as $k)
-                if (@$js[$k] !== null)
-                    $x .= " $k=\"" . str_replace("\"", "'", $js[$k]) . "\"";
-            if (isset($js["disabled"]) && $js["disabled"])
+            foreach ($js as $k => $v)
+                if (!@self::$_bad_js[$k] && $k !== "disabled"
+                    && $v !== null && $v !== false)
+                    $x .= " $k=\"" . str_replace("\"", "'", $v) . "\"";
+            if (@$js["disabled"])
                 $x .= " disabled=\"disabled\"";
         }
         return $x;
@@ -36,10 +43,31 @@ class Ht {
     }
 
     static function form($action, $extra = null) {
-        $method = $extra && isset($extra["method"]) ? $extra["method"] : "post";
-        return '<form method="' . $method . '" action="'
-            . $action . '" enctype="multipart/form-data" accept-charset="UTF-8"'
-            . self::extra($extra) . '>';
+        $method = @$extra["method"] ? : "post";
+        if ($method === "get" && strpos($action, "?") !== false)
+            error_log(caller_landmark() . ": GET form action $action params will be ignored");
+        $enctype = @$extra["enctype"];
+        if (!$enctype && $method !== "get")
+            $enctype = "multipart/form-data";
+        $x = '<form method="' . $method . '" action="' . $action . '"';
+        if ($enctype)
+            $x .= ' enctype="' . $enctype . '"';
+        return $x . ' accept-charset="UTF-8"' . self::extra($extra) . '>';
+    }
+
+    static function form_div($action, $extra = null) {
+        $div = "<div>";
+        if (($divclass = @$extra["divclass"]))
+            $div = '<div class="' . $divclass . '">';
+        if (@$extra["method"] === "get" && ($qpos = strpos($action, "?")) !== false) {
+            if (($hpos = strpos($action, "#", $qpos + 1)) === false)
+                $hpos = strlen($action);
+            foreach (preg_split('/(?:&amp;|&)/', substr($action, $qpos + 1, $hpos - $qpos - 1)) as $m)
+                if (($eqpos = strpos($m, "=")) !== false)
+                    $div .= '<input type="hidden" name="' . substr($m, 0, $eqpos) . '" value="' . urldecode(substr($m, $eqpos + 1)) . '" />';
+            $action = substr($action, 0, $qpos) . substr($action, $hpos);
+        }
+        return self::form($action, $extra) . $div;
     }
 
     static function hidden($name, $value = "", $extra = null) {
@@ -48,21 +76,23 @@ class Ht {
             . self::extra($extra) . ' />';
     }
 
-    static function select($name, $opt, $selected = null, $extra = null) {
-        if (is_array($selected) && $extra === null)
-            list($extra, $selected) = array($selected, null);
-        $x = '<select name="' . $name . '"' . self::extra($extra) . ">";
+    static function select($name, $opt, $selected = null, $js = null) {
+        if (is_array($selected) && $js === null)
+            list($js, $selected) = array($selected, null);
+        $disabled = @$js["disabled"];
+        if (is_array($disabled))
+            unset($js["disabled"]);
+        $x = '<select name="' . $name . '"' . self::extra($js) . ">";
         if ($selected === null || !isset($opt[$selected]))
             $selected = key($opt);
-        $disabled = defval($extra, "disabled", null);
-        $optionstyles = defval($extra, "optionstyles", null);
+        $optionstyles = defval($js, "optionstyles", null);
         $optgroup = "";
         foreach ($opt as $value => $info) {
             if (is_array($info) && $info[0] == "optgroup")
                 $info = (object) array("type" => "optgroup", "label" => $info[1]);
             else if (is_string($info)) {
                 $info = (object) array("label" => $info);
-                if ($disabled && isset($disabled[$value]))
+                if (is_array($disabled) && isset($disabled[$value]))
                     $info->disabled = $disabled[$value];
                 if ($optionstyles && isset($optionstyles[$value]))
                     $info->style = $optionstyles[$value];
@@ -77,10 +107,12 @@ class Ht {
                 $x .= '<option value="' . $value . '"';
                 if (strcmp($value, $selected) == 0)
                     $x .= ' selected="selected"';
-                if (isset($info->disabled) && $info->disabled)
+                if (@$info->disabled)
                     $x .= ' disabled="disabled"';
-                if (isset($info->style) && $info->style)
+                if (@$info->style)
                     $x .= ' style="' . $info->style . '"';
+                if (@$info->id)
+                    $x .= ' id="' . $info->id . '"';
                 $x .= '>' . $info->label . '</option>';
             }
         }
@@ -148,7 +180,7 @@ class Ht {
             $name = "";
         } else
             $name = $name ? " name=\"$name\"" : "";
-        if (preg_match("_[<>]_", $html) || isset($js["value"]))
+        if ($type == "button" || preg_match("_[<>]_", $html) || isset($js["value"]))
             return "<button type=\"$type\"$name value=\""
                 . defval($js, "value", 1) . "\"" . self::extra($js)
                 . ">" . $html . "</button>";
@@ -199,6 +231,7 @@ class Ht {
             self::stash_script("hotcrp_load(hotcrp_load.temptext)", "temptext");
         } else
             $temp = "";
+        unset($js["hottemptext"]);
         $type = @$js["type"] ? : "text";
         return '<input type="' . $type . '" name="' . $name . '" value="'
             . htmlspecialchars($value === null ? "" : $value) . '"'
@@ -225,11 +258,26 @@ class Ht {
             . '</textarea>';
     }
 
-    static function actions($actions, $js = null, $extra = "") {
+    static function actions($actions, $js = array(), $extra_text = "") {
         if (!count($actions))
             return "";
-        $t = "<div class=\"aa\"" . self::extra($js) . ">";
-        if (count($actions) > 1 || is_array($actions[0])) {
+        $js = $js ? : array();
+        if (!isset($js["class"]))
+            $js["class"] = "aa";
+        $t = "<div" . self::extra($js) . ">";
+        if ($js["class"] === "aab") {
+            foreach ($actions as $a) {
+                $t .= '<div class="aabut">';
+                if (is_array($a)) {
+                    $t .= $a[0];
+                    if (count($a) > 1)
+                        $t .= '<br><span class="hint">' . $a[1] . '</span>';
+                } else
+                    $t .= $a;
+                $t .= '</div>';
+            }
+            $t .= '<hr class="c">';
+        } else if (count($actions) > 1 || is_array($actions[0])) {
             $t .= "<table class=\"pt_buttons\"><tr>";
             $explains = 0;
             foreach ($actions as $a) {
@@ -255,7 +303,7 @@ class Ht {
             $t .= "</table>";
         } else
             $t .= $actions[0];
-        return $t . $extra . "</div>\n";
+        return $t . $extra_text . "</div>\n";
     }
 
     static function pre($html) {
@@ -281,6 +329,14 @@ class Ht {
         return "<pre style=\"white-space: pre-wrap\">" . htmlspecialchars($text) . "</pre>";
     }
 
+    static function pre_export($x) {
+        return "<pre>" . htmlspecialchars(var_export($x, true)) . "</pre>";
+    }
+
+    static function pre_export_wrap($x) {
+        return "<pre style=\"white-space: pre-wrap\">" . htmlspecialchars(var_export($x, true)) . "</pre>";
+    }
+
     static function img($src, $alt, $js = null) {
         if (is_string($js))
             $js = array("class" => $js);
@@ -297,11 +353,15 @@ class Ht {
                          . $content . ($form ? $form : "") . "</div>");
     }
 
+    static function mark_stash($uniqueid) {
+        $marked = @self::$_stash_map[$uniqueid];
+        self::$_stash_map[$uniqueid] = true;
+        return !$marked;
+    }
+
     static function stash_html($html, $uniqueid = null) {
         if ($html !== null && $html !== false && $html !== ""
-            && (!$uniqueid || !@self::$_stash_map[$uniqueid])) {
-            if ($uniqueid)
-                self::$_stash_map[$uniqueid] = true;
+            && (!$uniqueid || self::mark_stash($uniqueid))) {
             if (self::$_stash_inscript)
                 self::$_stash .= "</script>";
             self::$_stash .= $html;
@@ -311,9 +371,7 @@ class Ht {
 
     static function stash_script($js, $uniqueid = null) {
         if ($js !== null && $js !== false && $js !== ""
-            && (!$uniqueid || !@self::$_stash_map[$uniqueid])) {
-            if ($uniqueid)
-                self::$_stash_map[$uniqueid] = true;
+            && (!$uniqueid || self::mark_stash($uniqueid))) {
             if (!self::$_stash_inscript)
                 self::$_stash .= "<script>";
             else if (($c = self::$_stash[strlen(self::$_stash) - 1]) !== "}"

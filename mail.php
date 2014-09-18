@@ -5,17 +5,15 @@
 
 require_once("src/initweb.php");
 require_once("src/papersearch.php");
-if ($Me->is_empty() || (!$Me->privChair && !$Me->isPC))
+if (!$Me->privChair && !$Me->isPC)
     $Me->escape();
-$nullMailer = new Mailer(null, null, $Me);
-$nullMailer->width = 10000000;
 $checkReviewNeedsSubmit = false;
 $Error = $Warning = array();
 $pctags = pcTags();
 
 // load mail from log
 if (isset($_REQUEST["fromlog"]) && ctype_digit($_REQUEST["fromlog"])
-    && $Conf->sversion >= 40 && $Me->privChair) {
+    && $Me->privChair) {
     $result = $Conf->qe("select * from MailLog where mailId=" . $_REQUEST["fromlog"]);
     if (($row = edb_orow($result))) {
         foreach (array("recipients", "q", "t", "cc", "replyto", "subject", "emailBody") as $field)
@@ -28,16 +26,21 @@ if (isset($_REQUEST["fromlog"]) && ctype_digit($_REQUEST["fromlog"])
 
 // create options
 $tOpt = array();
-$tOpt["s"] = "Submitted papers";
-if ($Me->privChair && $Conf->timePCViewDecision(false) && $Conf->setting("paperacc") > 0)
-    $tOpt["acc"] = "Accepted papers";
 if ($Me->privChair) {
+    $tOpt["s"] = "Submitted papers";
+    if ($Conf->timePCViewDecision(false) && $Conf->setting("paperacc") > 0)
+        $tOpt["acc"] = "Accepted papers";
     $tOpt["unsub"] = "Unsubmitted papers";
     $tOpt["all"] = "All papers";
 }
 $tOpt["req"] = "Your review requests";
 if (!isset($_REQUEST["t"]) || !isset($tOpt[$_REQUEST["t"]]))
     $_REQUEST["t"] = key($tOpt);
+
+// mailer
+$mailer_options = array("requester_contact" => $Me);
+$nullMailer = new Mailer(null, null, $mailer_options);
+$nullMailer->width = 10000000;
 
 // template options
 if (isset($_REQUEST["monreq"]))
@@ -84,11 +87,7 @@ $subjectPrefix = "[" . $Opt["shortName"] . "] ";
 function contactQuery($type) {
     global $Conf, $Me, $papersel, $checkReviewNeedsSubmit;
     $contactInfo = "firstName, lastName, email, password, roles, ContactInfo.contactId, (PCMember.contactId is not null) as isPC, preferredEmail";
-    $paperInfo = "Paper.paperId, Paper.title, Paper.abstract, Paper.authorInformation, Paper.outcome, Paper.blind, Paper.timeSubmitted, Paper.timeWithdrawn, Paper.shepherdContactId";
-    if ($Conf->sversion >= 41)
-        $paperInfo .= ", Paper.capVersion";
-    if ($Conf->sversion >= 51)
-        $paperInfo .= ", Paper.managerContactId";
+    $paperInfo = "Paper.paperId, Paper.title, Paper.abstract, Paper.authorInformation, Paper.outcome, Paper.blind, Paper.timeSubmitted, Paper.timeWithdrawn, Paper.shepherdContactId, Paper.capVersion, Paper.managerContactId";
 
     // paper limit
     $where = array();
@@ -169,7 +168,7 @@ function contactQuery($type) {
 
 function checkMailPrologue($send) {
     global $Conf, $Me, $recip;
-    echo "<form method='post' action='", hoturl_post("mail"), "' enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>\n";
+    echo Ht::form_div(hoturl_post("mail"));
     foreach (array("recipients", "subject", "emailBody", "cc", "replyto", "q", "t", "plimit") as $x)
         if (isset($_REQUEST[$x]))
             echo Ht::hidden($x, $_REQUEST[$x]);
@@ -223,8 +222,8 @@ function echo_mailinfo($mcount, $mrecipients, $mpapers) {
 }
 
 function checkMail($send) {
-    global $Conf, $Me, $Error, $subjectPrefix, $recip,
-        $checkReviewNeedsSubmit;
+    global $Conf, $Opt, $Me, $Error, $subjectPrefix, $recip,
+        $checkReviewNeedsSubmit, $mailer_options;
     $q = contactQuery($_REQUEST["recipients"]);
     if (!$q)
         return $Conf->errorMsg("Bad recipients value");
@@ -237,17 +236,15 @@ function checkMail($send) {
         $subject = $subjectPrefix . $subject;
     if ($send) {
         $mailId = "";
-        if ($Conf->sversion >= 40) {
-            $q = "recipients='" . sqlq($_REQUEST["recipients"])
-                . "', cc='" . sqlq($_REQUEST["cc"])
-                . "', replyto='" . sqlq($_REQUEST["replyto"])
-                . "', subject='" . sqlq($_REQUEST["subject"])
-                . "', emailBody='" . sqlq($_REQUEST["emailBody"]) . "'";
-            if ($Conf->sversion >= 79)
-                $q .= ", q='" . sqlq($_REQUEST["q"]) . "', t='" . sqlq($_REQUEST["t"]) . "'";
-            if ($Conf->q("insert into MailLog set $q"))
-                $mailId = " #" . $Conf->lastInsertId();
-        }
+        $q = "recipients='" . sqlq($_REQUEST["recipients"])
+            . "', cc='" . sqlq($_REQUEST["cc"])
+            . "', replyto='" . sqlq($_REQUEST["replyto"])
+            . "', subject='" . sqlq($_REQUEST["subject"])
+            . "', emailBody='" . sqlq($_REQUEST["emailBody"]) . "'";
+        if ($Conf->sversion >= 79)
+            $q .= ", q='" . sqlq($_REQUEST["q"]) . "', t='" . sqlq($_REQUEST["t"]) . "'";
+        if (($log_result = Dbl::real_query("insert into MailLog set $q")))
+            $mailId = " #" . $log_result->insert_id;
         $Me->log_activity("Sending mail$mailId \"$subject\"");
     }
     $emailBody = $_REQUEST["emailBody"];
@@ -255,6 +252,7 @@ function checkMail($send) {
     $template = array("subject" => $subject, "body" => $emailBody);
     $rest = array("cc" => $_REQUEST["cc"], "replyto" => $_REQUEST["replyto"],
                   "error" => false, "mstate" => new MailerState());
+    $rest = array_merge($rest, $mailer_options);
     $last = array("subject" => "", "body" => "", "to" => "");
     $any = false;
     $mcount = 0;
@@ -273,7 +271,7 @@ function checkMail($send) {
         $contact = Contact::make($row);
         $rest["hideReviews"] = $checkReviewNeedsSubmit && $row->reviewNeedsSubmit;
         $rest["error"] = false;
-        $preparation = Mailer::prepareToSend($template, $row, $contact, $Me, $rest); // see also $show_preparation below
+        $preparation = Mailer::prepareToSend($template, $row, $contact, $rest); // see also $show_preparation below
         if ($rest["error"] !== false) {
             $Error[$rest["error"]] = true;
             $emsg = "This " . Mailer::$mailHeaders[$rest["error"]] . " field isn’t a valid email list: <blockquote><tt>" . htmlspecialchars($rest[$rest["error"]]) . "</tt></blockquote>  Make sure email address are separated by commas.  When mixing names and email addresses, try putting names in \"quotes\" and email addresses in &lt;angle brackets&gt;.";
@@ -308,12 +306,12 @@ function checkMail($send) {
             }
 
             // hide passwords from non-chair users
-            if ($Me->privChair)
-                $show_preparation =& $preparation;
+            if ($Me->privChair && !@$Opt["chairHidePasswords"])
+                $show_preparation = $preparation;
             else {
-                $rest["hideSensitive"] = true;
-                $show_preparation = Mailer::prepareToSend($template, $row, $contact, $Me, $rest);
-                $rest["hideSensitive"] = false;
+                $rest["sensitivity"] = "display";
+                $show_preparation = Mailer::prepareToSend($template, $row, $contact, $rest);
+                unset($rest["sensitivity"]);
             }
 
             echo "<div class='mail'><table>";
@@ -328,7 +326,7 @@ function checkMail($send) {
                         echo "<td class='mhx'></td>";
                     else {
                         ++$cbcount;
-                        echo "<td class='mhcb'><input type='checkbox' class='cb' name='$checker' value='1' checked='checked' id='psel$cbcount' onclick='pselClick(event,this)' /> &nbsp;</td>";
+                        echo "<td class='mhcb'><input type='checkbox' class='cb' name='$checker' value='1' checked='checked' id='psel$cbcount' onclick='pselClick(event,this)' /></td>";
                     }
                     $x = htmlspecialchars(Mailer::mimeHeaderUnquote($show_preparation[$k]));
                     echo "<td class='mhnp'>", $t, ":</td><td class='mhdp'>", $x, "</td></tr>\n";
@@ -352,7 +350,7 @@ function checkMail($send) {
     echo_mailinfo($mcount, $mrecipients, $mpapers);
 
     if (!$any && !count($preperrors))
-        return $Conf->errorMsg("No users match &ldquo;" . $recip[$_REQUEST["recipients"]] . "&rdquo; for that search.");
+        return $Conf->errorMsg("No users match “" . $recip[$_REQUEST["recipients"]] . "” for that search.");
     else if (!$any)
         return false;
     else if (!$send) {
@@ -427,11 +425,9 @@ if ($Me->privChair) {
     $recip["uncrev"] = "Reviewers with incomplete reviews";
     $recip["pcrev"] = "PC reviewers";
     $recip["uncpcrev"] = "PC reviewers with incomplete reviews";
-    if ($Conf->sversion >= 46) {
-        $result = $Conf->q("select paperId from PaperReview where reviewType>=" . REVIEW_PC . " and timeRequested>timeRequestNotified and reviewSubmitted is null and reviewNeedsSubmit!=0");
-        if (edb_nrows($result) > 0)
-            $recip["newpcrev"] = "PC reviewers with new review assignments";
-    }
+    $result = $Conf->q("select paperId from PaperReview where reviewType>=" . REVIEW_PC . " and timeRequested>timeRequestNotified and reviewSubmitted is null and reviewNeedsSubmit!=0");
+    if (edb_nrows($result) > 0)
+        $recip["newpcrev"] = "PC reviewers with new review assignments";
     $recip["extrev"] = "External reviewers";
     $recip["uncextrev"] = "External reviewers with incomplete reviews";
     if ($anyLead)
@@ -505,7 +501,7 @@ if (isset($_REQUEST["monreq"])) {
     }
 }
 
-echo "<form method='post' action='", hoturl_post("mail", "check=1"), "' enctype='multipart/form-data' accept-charset='UTF-8'><div class='inform'>\n",
+echo Ht::form_div(hoturl_post("mail", "check=1")),
     Ht::hidden_default_submit("default", 1), "
 
 <div class='aa' style='padding-left:8px'>
@@ -546,8 +542,8 @@ echo "<span class='fx8'>:</span><br />
 <div class='fx8'>";
 $q = defval($_REQUEST, "q", "(All)");
 $q = ($q == "" ? "(All)" : $q);
-echo "Search&nbsp; <input id='q' class='textlite",
-    ($q == "(All)" ? " temptext" : " temptextoff"),
+echo "Search&nbsp; <input id='q' class='",
+    ($q == "(All)" ? "temptext" : "temptextoff"),
     "' type='text' size='36' name='q' value=\"", htmlspecialchars($q), "\" title='Enter paper numbers or search terms' /> &nbsp;in &nbsp;",
     Ht::select("t", $tOpt, $_REQUEST["t"], array("id" => "t")),
     "</div>
@@ -577,7 +573,7 @@ echo "  <tr><td class='mhnp'>Subject:</td><td class='mhdp'>",
 </table></div>\n\n";
 
 
-if ($Me->privChair && $Conf->sversion >= 40) {
+if ($Me->privChair) {
     $result = $Conf->qe("select * from MailLog order by mailId desc limit 18");
     if (edb_nrows($result)) {
         echo "<div style='padding-top:12px'>",

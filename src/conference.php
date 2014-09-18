@@ -5,7 +5,7 @@
 
 class Conference {
 
-    var $dblink = null;
+    public $dblink = null;
 
     var $settings;
     var $settingTexts;
@@ -38,83 +38,21 @@ class Conference {
     const PCSEEREV_UNLESSINCOMPLETE = 3;
     const PCSEEREV_UNLESSANYINCOMPLETE = 4;
 
+    static public $review_deadlines = array("pcrev_soft", "pcrev_hard", "extrev_soft", "extrev_hard");
+
     function __construct($dsn) {
         global $Opt;
         // unpack dsn, connect to database, load current settings
         if (($this->dsn = $dsn))
-            list($this->dblink, $Opt["dbName"]) = self::connect_dsn($this->dsn);
+            list($this->dblink, $Opt["dbName"]) = Dbl::connect_dsn($this->dsn);
         if (!@$Opt["confid"])
-            $Opt["confid"] = $Opt["dbName"];
-        if ($this->dblink)
+            $Opt["confid"] = @$Opt["dbName"];
+        if ($this->dblink) {
+            Dbl::set_default_dblink($this->dblink);
+            Dbl::set_error_handler(array($this, "query_error_handler"));
             $this->load_settings();
-        else
+        } else
             $this->crosscheck_options();
-    }
-
-    static function make_dsn($opt) {
-        if (isset($opt["dsn"])) {
-            if (is_string($opt["dsn"]))
-                return $opt["dsn"];
-        } else {
-            list($user, $password, $host, $name) =
-                array(@$opt["dbUser"], @$opt["dbPassword"], @$opt["dbHost"], @$opt["dbName"]);
-            $user = ($user !== null ? $user : $name);
-            $password = ($password !== null ? $password : $name);
-            $host = ($host !== null ? $host : "localhost");
-            if (is_string($user) && is_string($password) && is_string($host) && is_string($name))
-                return "mysql://" . urlencode($user) . ":" . urlencode($password) . "@" . urlencode($host) . "/" . urlencode($name);
-        }
-        return null;
-    }
-
-    static function sanitize_dsn($dsn) {
-        return preg_replace('{\A(\w+://[^/:]*:)[^\@/]+([\@/])}', '$1PASSWORD$2', $dsn);
-    }
-
-    static function connect_dsn($dsn) {
-        global $Opt;
-
-        $dbhost = $dbuser = $dbpass = $dbname = $dbport = $dbsocket = null;
-        if ($dsn && preg_match('|^mysql://([^:@/]*)/(.*)|', $dsn, $m)) {
-            $dbhost = urldecode($m[1]);
-            $dbname = urldecode($m[2]);
-        } else if ($dsn && preg_match('|^mysql://([^:@/]*)@([^/]*)/(.*)|', $dsn, $m)) {
-            $dbhost = urldecode($m[2]);
-            $dbuser = urldecode($m[1]);
-            $dbname = urldecode($m[3]);
-        } else if ($dsn && preg_match('|^mysql://([^:@/]*):([^@/]*)@([^/]*)/(.*)|', $dsn, $m)) {
-            $dbhost = urldecode($m[3]);
-            $dbuser = urldecode($m[1]);
-            $dbpass = urldecode($m[2]);
-            $dbname = urldecode($m[4]);
-        } else
-            return array(null, null);
-
-        if ($dbhost === null)
-            $dbhost = ini_get("mysqli.default_host");
-        if ($dbuser === null)
-            $dbuser = ini_get("mysqli.default_user");
-        if ($dbpass === null)
-            $dbpass = ini_get("mysqli.default_pw");
-        if ($dbport === null)
-            $dbport = ini_get("mysqli.default_port");
-        if ($dbsocket === null && @$Opt["dbSocket"])
-            $dbsocket = $Opt["dbSocket"];
-        else if ($dbsocket === null)
-            $dbsocket = ini_get("mysqli.default_socket");
-
-        $dblink = new mysqli($dbhost, $dbuser, $dbpass, "", $dbport, $dbsocket);
-        if ($dblink && !mysqli_connect_errno()) {
-            // disallow reserved databases
-            if ($dbname == "mysql" || substr($dbname, -7) === "_schema") {
-                $dblink->close();
-                $dblink = null;
-            } else if ($dblink->select_db($dbname))
-                $dblink->set_charset("utf8");
-        } else
-            $dblink = null;
-
-        return array($dblink, $dbname);
     }
 
 
@@ -123,7 +61,7 @@ class Conference {
     //
 
     function load_settings() {
-        global $Opt, $OptOverride, $OK;
+        global $Opt, $OptOverride, $Now, $OK;
 
         // load settings from database
         $this->settings = array();
@@ -144,13 +82,15 @@ class Conference {
         }
 
         // update schema
-        if ($this->settings["allowPaperOption"] < 79) {
+        if ($this->settings["allowPaperOption"] < 81) {
             require_once("updateschema.php");
             $oldOK = $OK;
             updateSchema($this);
             $OK = $oldOK;
         }
         $this->sversion = $this->settings["allowPaperOption"];
+        if ($this->sversion < 55)
+            $this->errorMsg("Warning: The database could not be upgraded to the current version; expect errors. A system administrator must solve this problem.");
 
         // invalidate caches after loading from backup
         if (isset($this->settings["frombackup"])
@@ -184,12 +124,14 @@ class Conference {
 
         // GC old capabilities
         if ($this->sversion >= 58
-            && defval($this->settings, "__capability_gc", 0) < time() - 86400) {
-            $now = time();
-            $this->q("delete from Capability where timeExpires>0 and timeExpires<$now");
-            $this->q("delete from CapabilityMap where timeExpires>0 and timeExpires<$now");
-            $this->q("insert into Settings (name, value) values ('__capability_gc', $now) on duplicate key update value=values(value)");
-            $this->settings["__capability_gc"] = $now;
+            && defval($this->settings, "__capability_gc", 0) < $Now - 86400) {
+            foreach (array($this->dblink, Contact::contactdb()) as $db)
+                if ($db) {
+                    Dbl::ql($db, "delete from Capability where timeExpires>0 and timeExpires<$Now");
+                    Dbl::ql($db, "delete from CapabilityMap where timeExpires>0 and timeExpires<$Now");
+                }
+            $this->q("insert into Settings (name, value) values ('__capability_gc', $Now) on duplicate key update value=values(value)");
+            $this->settings["__capability_gc"] = $Now;
         }
 
         $this->crosscheck_settings();
@@ -199,7 +141,7 @@ class Conference {
     private function crosscheck_settings() {
         global $Opt;
         // enforce invariants
-        foreach (array("pc_seeall", "pcrev_any", "extrev_view", "rev_notifychair") as $x)
+        foreach (array("pcrev_any", "extrev_view", "rev_notifychair") as $x)
             if (!isset($this->settings[$x]))
                 $this->settings[$x] = 0;
         if (!isset($this->settings["sub_blind"]))
@@ -212,8 +154,6 @@ class Conference {
             else if (@$this->settings["rev_seedec"])
                 $this->settings["seedec"] = self::SEEDEC_REV;
         }
-        if ($this->settings["pc_seeall"] && !$this->timeFinalizePaper())
-            $this->settings["pc_seeall"] = -1;
         if (@$this->settings["pc_seeallrev"] == 2) {
             $this->settings["pc_seeblindrev"] = 1;
             $this->settings["pc_seeallrev"] = self::PCSEEREV_YES;
@@ -452,7 +392,7 @@ class Conference {
 
     function round_name($roundno, $expand) {
         if ($roundno > 0) {
-            if (($rtext = @$this->rounds[$roundno]))
+            if (($rtext = @$this->rounds[$roundno]) && $rtext !== ";")
                 return $rtext;
             else if ($expand)
                 return "?$roundno?"; /* should not happen */
@@ -460,17 +400,34 @@ class Conference {
         return "";
     }
 
+    static function round_name_error($rname) {
+        if ((string) $rname === "")
+            return "Empty round name.";
+        else if (!strcasecmp($rname, "none") || !strcasecmp($rname, "any"))
+            return "Round name $rname is reserved.";
+        else if (!preg_match('/^[a-zA-Z0-9]+$/', $rname))
+            return "Round names can only contain letters and numbers.";
+        else
+            return false;
+    }
+
+    function current_round($add = false) {
+        return $this->round_number(@$this->settingTexts["rev_roundtag"], $add);
+    }
+
     function round_number($name, $add) {
-        $r = 0;
-        if ($name
-            && !($r = array_search($name, $this->rounds))
-            && $add) {
+        if (!$name)
+            return 0;
+        for ($i = 1; $i != count($this->rounds); ++$i)
+            if (!strcasecmp($this->rounds[$i], $name))
+                return $i;
+        if ($add) {
             $rtext = $this->setting_data("tag_rounds", "");
             $rtext = ($rtext ? "$rtext$name " : " $name ");
             $this->save_setting("tag_rounds", 1, $rtext);
-            $r = array_search($name, $this->rounds);
-        }
-        return $r ? $r : 0;
+            return $this->round_number($name, false);
+        } else
+            return 0;
     }
 
     function session($name, $defval = null) {
@@ -534,7 +491,7 @@ class Conference {
             $this->q("insert into Settings (name, value) values ('papersub',1) on duplicate key update name=name");
         else if ($papersub <= 0 || !$forsubmit)
             // see also settings.php
-            $this->q("update Settings set value=(select ifnull(min(paperId),0) from Paper where " . (defval($this->settings, "pc_seeall") <= 0 ? "timeSubmitted>0" : "timeWithdrawn<=0") . ") where name='papersub'");
+            $this->q("update Settings set value=(select ifnull(min(paperId),0) from Paper where " . ($this->can_pc_see_all_submissions() ? "timeWithdrawn<=0" : "timeSubmitted>0") . ") where name='papersub'");
     }
 
     function updatePaperaccSetting($foraccept) {
@@ -621,7 +578,7 @@ class Conference {
     function ql($query) {
         $result = $this->dblink->query($query);
         if (!$result)
-            error_log($this->dblink->error);
+            error_log(caller_landmark() . ": " . $this->dblink->error);
         return $result;
     }
 
@@ -633,17 +590,14 @@ class Conference {
         return $result;
     }
 
-    function db_error_html($getdb = true, $while = "", $suggestRetry = true) {
+    function db_error_html($getdb = true, $while = "") {
         global $Opt;
         $text = "<p>Database error";
         if ($while)
             $text .= " $while";
         if ($getdb)
             $text .= ": " . htmlspecialchars($this->dblink->error);
-        $text .= "</p>";
-        if ($suggestRetry)
-            $text .= "\n<p>Please try again or contact us at " . Text::user_html(Contact::site_contact()) . ".</p>";
-        return $text;
+        return $text . "</p>";
     }
 
     function db_error_text($getdb = true, $while = "") {
@@ -655,31 +609,25 @@ class Conference {
         return $text;
     }
 
+    function query_error_handler($dblink, $query) {
+        global $OK;
+        if (PHP_SAPI == "cli")
+            fwrite(STDERR, caller_landmark("/^(?:Dbl::|Conference::q)/") . ": database error: $dblink->error in $query\n");
+        else
+            $this->errorMsg($this->db_error_html(true, Ht::pre_text_wrap($query)));
+        $OK = false;
+    }
+
     function qe($query, $while = "", $suggestRetry = false) {
         global $OK;
-        if ($while || $suggestRetry) {
-            $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-            error_log($backtrace[1]["file"] . ":" . $backtrace[1]["line"] . ": bad call to Conference::qe");
-        }
+        if ($while || $suggestRetry)
+            error_log(caller_landmark() . ": bad call to Conference::qe");
         $result = $this->dblink->query($query);
         if ($result === false) {
             if (PHP_SAPI == "cli")
-                fwrite(STDERR, $this->db_error_text(true, "$while ($query)") . "\n");
+                fwrite(STDERR, caller_landmark() . ": " . $this->db_error_text(true, "[$query]") . "\n");
             else
-                $this->errorMsg($this->db_error_html(true, $while . " (" . htmlspecialchars($query) . ")", $suggestRetry));
-            $OK = false;
-        }
-        return $result;
-    }
-
-    function lastInsertId($ignore_errors = false) {
-        global $OK;
-        $result = $this->dblink->insert_id;
-        if (!$result && !$ignore_errors) {
-            if (PHP_SAPI == "cli")
-                fwrite(STDERR, $this->db_error_text($result === false) . "\n");
-            else
-                $this->errorMsg($this->db_error_html($result === false));
+                $this->errorMsg($this->db_error_html(true, Ht::pre_text_wrap($query)));
             $OK = false;
         }
         return $result;
@@ -693,17 +641,43 @@ class Conference {
         // Return all deadline-relevant settings as integers.
         if (!$this->deadline_cache) {
             $dl = array("now" => $Now);
+            // main deadlines
             foreach (array("sub_open", "sub_reg", "sub_update", "sub_sub",
                            "sub_close", "sub_grace",
                            "resp_open", "resp_done", "resp_grace",
-                           "rev_open", "pcrev_soft", "pcrev_hard",
-                           "extrev_soft", "extrev_hard", "rev_grace",
+                           "rev_open", "rev_grace",
                            "final_open", "final_soft", "final_done",
-                           "final_grace") as $x)
-                $dl[$x] = isset($this->settings[$x]) ? +$this->settings[$x] : 0;
+                           "final_grace") as $k)
+                $dl[$k] = @+$this->settings[$k];
+            // per-round review deadlines
+            foreach ($this->rounds as $i => $rname)
+                if (!$i || $rname !== ";") {
+                    $suffix = $i ? "_$i" : "";
+                    $ndeadlines = 0;
+                    foreach (self::$review_deadlines as $k) {
+                        $dl[$k . $suffix] = @+$this->settings[$k . $suffix];
+                        $ndeadlines += isset($this->settings[$k . $suffix]);
+                    }
+                    if ($i && $ndeadlines == 0)
+                        foreach (self::$review_deadlines as $k)
+                            $dl[$k . $suffix] = $dl[$k];
+                    if (!$i && !$dl["extrev_soft"] && !$dl["extrev_hard"]) {
+                        $dl["extrev_soft"] = $dl["pcrev_soft"];
+                        $dl["extrev_hard"] = $dl["pcrev_hard"];
+                    }
+                }
             $this->deadline_cache = $dl;
         }
         return $this->deadline_cache;
+    }
+
+    function round_deadlines($roundnum) {
+        $dl = $this->deadlines();
+        $suffix = isset($dl["pcrev_soft_$roundnum"]) ? "_$roundnum" : "";
+        $dlx = array();
+        foreach (self::$review_deadlines as $k)
+            $dlx[$k] = $dl[$k . $suffix];
+        return $dlx;
     }
 
     function printableInterval($amt) {
@@ -857,10 +831,10 @@ class Conference {
     }
     function deadlinesBetween($name1, $name2, $grace = null) {
         $dl = $this->deadlines();
-        $t = defval($dl, $name1, null);
+        $t = @$dl[$name1];
         if (($t === null || $t <= 0 || $t > $dl["now"]) && $name1)
             return false;
-        $t = defval($dl, $name2, null);
+        $t = @$dl[$name2];
         if ($t !== null && $t > 0 && $grace && isset($dl[$grace]))
             $t += $dl[$grace];
         return ($t === null || $t <= 0 || $t >= $dl["now"]);
@@ -896,14 +870,32 @@ class Conference {
     function timeAuthorViewDecision() {
         return $this->setting("seedec") == self::SEEDEC_ALL;
     }
-    function timeReviewOpen() {
+    function time_review_open() {
         $dl = $this->deadlines();
         return $dl["rev_open"] > 0 && $dl["now"] >= $dl["rev_open"];
     }
-    function time_review($isPC, $hard, $assume_open = false) {
-        $od = ($assume_open ? "" : "rev_open");
-        $d = ($isPC ? "pcrev_" : "extrev_") . ($hard ? "hard" : "soft");
-        return $this->deadlinesBetween($od, $d, "rev_grace") > 0;
+    function review_deadline($round, $isPC, $hard) {
+        $dn = ($isPC ? "pcrev_" : "extrev_") . ($hard ? "hard" : "soft");
+        if ($round === null)
+            $round = $this->current_round(false);
+        else if (is_object($round))
+            $round = $round->reviewRound ? : 0;
+        if ($round && ($dl = $this->deadlines()) && isset($dl["{$dn}_$round"]))
+            $dn .= "_$round";
+        return $dn;
+    }
+    function missed_review_deadline($round, $isPC, $hard) {
+        $dl = $this->deadlines();
+        if (!($dl["rev_open"] > 0 && $dl["now"] >= $dl["rev_open"]))
+            return "rev_open";
+        $dn = $this->review_deadline($round, $isPC, $hard);
+        if (!$dl[$dn] || $dl["now"] <= $dl[$dn] + $dl["rev_grace"])
+            return false;
+        else
+            return $dn;
+    }
+    function time_review($round, $isPC, $hard) {
+        return !$this->missed_review_deadline($round, $isPC, $hard);
     }
     function timePCReviewPreferences() {
         return defval($this->settings, "papersub") > 0;
@@ -933,20 +925,14 @@ class Conference {
             return false;
         else if ($prow->timeSubmitted > 0)
             return true;
-            //return !$download || $this->setting('sub_freeze') > 0
-            //  || $this->deadlinesAfter("sub_sub", "sub_grace")
-            //  || $this->setting('sub_open') <= 0;
         else
-            return !$download && $this->setting('pc_seeall') > 0;
+            return !$download && $this->can_pc_see_all_submissions();
     }
     function timeReviewerViewSubmittedPaper() {
         return true;
     }
     function timeEmailChairAboutReview() {
         return $this->settings['rev_notifychair'] > 0;
-    }
-    function timeEmailAuthorsAboutReview() {
-        return $this->settingsAfter('au_seerev');
     }
 
     function submission_blindness() {
@@ -980,6 +966,18 @@ class Conference {
     function has_managed_submissions() {
         $result = $this->q("select paperId from Paper where timeSubmitted>0 and managerContactId!=0 limit 1");
         return !!edb_row($result);
+    }
+
+    function can_pc_see_all_submissions() {
+        $dl = $this->deadlines();
+        $pc_seeall = @$dl["pc_seeall"];
+        if ($pc_seeall === null) {
+            $pc_seeall = @$this->settings["pc_seeall"] ? : 0;
+            if ($pc_seeall > 0 && !$this->timeFinalizePaper())
+                $pc_seeall = 0;
+            $this->deadline_cache["pc_seeall"] = $pc_seeall;
+        }
+        return $pc_seeall > 0;
     }
 
 
@@ -1064,8 +1062,7 @@ class Conference {
         $q = "select p.paperId, s.mimetype, s.sha1, s.timestamp, ";
         if (!@$Opt["docstore"] && !is_array($prow))
             $q .= "s.paper as content, ";
-        if ($this->sversion >= 45)
-            $q .= "s.filename, ";
+        $q .= "s.filename, ";
         if ($this->sversion >= 55)
             $q .= "s.infoJson, ";
         $q .= "$documentType documentType, s.paperStorageId from Paper p";
@@ -1221,8 +1218,6 @@ class Conference {
         $pq = "select Paper.*, PaperConflict.conflictType,
                 count(AllReviews.reviewSubmitted) as reviewCount,
                 count(if(AllReviews.reviewNeedsSubmit<=0,AllReviews.reviewSubmitted,AllReviews.reviewId)) as startedReviewCount";
-        if ($this->sversion < 51)
-            $pq .= ",\n\t\t0 as managerContactId";
         $myPaperReview = null;
         if (!isset($options["author"])) {
             if ($allReviewerQuery)
@@ -1265,13 +1260,8 @@ class Conference {
                 CommentConflict.conflictType as commentConflictType,
                 PaperComment.timeModified,
                 PaperComment.comment,
-                PaperComment.replyTo";
-            if ($this->sversion >= 53)
-                $pq .= ",\n\t\tPaperComment.commentType";
-            else
-                $pq .= ",\n\t\tPaperComment.forReviewers,
-                PaperComment.forAuthors,
-                PaperComment.blind as commentBlind";
+                PaperComment.replyTo,
+                PaperComment.commentType";
         }
         if (@$options["topics"])
             $pq .= ",
@@ -1363,9 +1353,10 @@ class Conference {
             $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr) and PaperReview.reviewNeedsSubmit!=0)\n";
         else if (@$options["myReviewsOpt"])
             $pq .= "            left join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))\n";
-        else if (@$options["allReviews"] || @$options["allReviewScores"])
-            $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId)\n";
-        else if (!@$options["author"])
+        else if (@$options["allReviews"] || @$options["allReviewScores"]) {
+            $x = (@$options["reviewLimitSql"] ? " and (" . $options["reviewLimitSql"] . ")" : "");
+            $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId$x)\n";
+        } else if (!@$options["author"])
             $pq .= "            left join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))\n";
         if ($myPaperReview == "MyPaperReview")
             $pq .= "            left join PaperReview as MyPaperReview on (MyPaperReview.paperId=Paper.paperId and MyPaperReview.contactId=$contactId)\n";
@@ -1567,14 +1558,12 @@ class Conference {
                 return null;
             }
         }
-        $contactTags = "NULL as contactTags";
-        if ($this->sversion >= 35)
-            $contactTags = "ContactInfo.contactTags";
+        $contactTags = "ContactInfo.contactTags";
 
         $q = "select PaperReview.*,
                 ContactInfo.firstName, ContactInfo.lastName, ContactInfo.email, ContactInfo.roles as contactRoles,
                 $contactTags,
-                ReqCI.firstName as reqFirstName, ReqCI.lastName as reqLastName, ReqCI.email as reqEmail, ReqCI.contactId as reqContactId";
+                ReqCI.firstName as reqFirstName, ReqCI.lastName as reqLastName, ReqCI.email as reqEmail";
         if (isset($selector["ratings"]))
             $q .= ",
                 group_concat(ReviewRating.rating order by ReviewRating.rating desc) as allRatings,
@@ -1647,7 +1636,7 @@ class Conference {
                 left join PaperConflict PC on (PC.paperId=PRP.paperId and PC.contactId=PRP.contactId)
                 where PRP.preference<=-100 and coalesce(PC.conflictType,0)<=0
                   and P.timeWithdrawn<=0";
-        if ($type != "all" && ($type || $this->setting("pc_seeall") <= 0))
+        if ($type != "all" && ($type || !$this->can_pc_see_all_submissions()))
             $q .= " and P.timeSubmitted>0";
         if ($extra)
             $q .= " " . $extra;
@@ -1666,17 +1655,14 @@ class Conference {
     }
 
     private function _flowQueryRest() {
-        $q = "          Paper.title,
+        return "          Paper.title,
                 substring(Paper.title from 1 for 80) as shortTitle,
                 Paper.timeSubmitted,
                 Paper.timeWithdrawn,
                 Paper.blind as paperBlind,
-                Paper.outcome,\n";
-        if ($this->sversion >= 51)
-            $q .= "             Paper.managerContactId,\n";
-        else
-            $q .= "             0 as managerContactId,\n";
-        return $q . "           ContactInfo.firstName as reviewFirstName,
+                Paper.outcome,
+                Paper.managerContactId,
+                ContactInfo.firstName as reviewFirstName,
                 ContactInfo.lastName as reviewLastName,
                 ContactInfo.email as reviewEmail,
                 PaperConflict.conflictType,
@@ -1856,15 +1842,6 @@ class Conference {
         exit;
     }
 
-    function tagRoundLocker($dolocker) {
-        if (!$dolocker)
-            return "";
-        else if (!defval($this->settings, "rev_roundtag", ""))
-            return ", Settings write";
-        else
-            return ", Settings write, PaperTag write";
-    }
-
 
     //
     // Conference header, footer
@@ -1931,7 +1908,7 @@ class Conference {
             $this->scriptStuff = Ht::script_file($jquery) . "\n";
 
             if (@$Opt["strictJavascript"])
-                $this->scriptStuff .= Ht::script_file($Opt["assetsURL"] . "cacheable.php?file=scripts/script.js&mtime=" . filemtime("$ConfSitePATH/scripts/script.js")) . "\n";
+                $this->scriptStuff .= Ht::script_file($Opt["assetsURL"] . "cacheable.php?file=scripts/script.js&strictjs=1&mtime=" . filemtime("$ConfSitePATH/scripts/script.js")) . "\n";
             else
                 $this->scriptStuff .= Ht::script_file($Opt["assetsURL"] . "scripts/script.js?mtime=" . filemtime("$ConfSitePATH/scripts/script.js")) . "\n";
 
@@ -1960,6 +1937,14 @@ class Conference {
         if (@$CurrentList
             && ($list = SessionList::lookup($CurrentList)))
             $this->scriptStuff .= ";hotcrp_list={num:$CurrentList,id:\"" . addcslashes($list->listid, "\n\r\\\"/") . "\"}";
+        if (($urldefaults = hoturl_defaults()))
+            $this->scriptStuff .= ";hotcrp_urldefaults=" . json_encode($urldefaults);
+        $huser = (object) array();
+        if ($Me && $Me->email)
+            $huser->email = $Me->email;
+        if ($Me && $Me->is_pclike())
+            $huser->is_pclike = true;
+        $this->scriptStuff .= ";hotcrp_user=" . json_encode($huser);
 
         $pid = @$_REQUEST["paperId"];
         $pid = $pid && ctype_digit($pid) ? (int) $pid : 0;
@@ -1970,8 +1955,8 @@ class Conference {
         $this->scriptStuff .= ";hotcrp_load.time(" . (-date("Z", $Now) / 60) . "," . (@$Opt["time24hour"] ? 1 : 0) . ")";
 
         if ($Me) {
-            $dl = $Me->deadlines();
-            $this->scriptStuff .= ";hotcrp_deadlines.init(" . json_encode($dl) . ",\"" . hoturl("deadlines") . "\")";
+            $dl = $Me->my_deadlines();
+            $this->scriptStuff .= ";hotcrp_deadlines.init(" . json_encode($dl) . ")";
         } else
             $dl = array();
 
@@ -1982,8 +1967,6 @@ class Conference {
         if ($trackerowner)
             $this->scriptStuff .= ";hotcrp_deadlines.tracker(0)";
 
-        if ($Me && $Me->isPC)
-            $this->scriptStuff .= ";alltags.url=\"" . hoturl("search", "alltags=1") . "\"";
         $this->scriptStuff .= "</script>";
 
         // If browser owns tracker, send it the script immediately
@@ -1998,34 +1981,32 @@ class Conference {
         else
             echo "<a class='x' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a></h1></div><div id='header_left_page'><h1>", $title;
         echo "</h1></div><div id='header_right'>";
-        if ($Me && $Me->is_known_user()) {
+        if ($Me && !$Me->is_empty()) {
             // profile link
-            $xsep = " <span class='barsep'>&nbsp;|&nbsp;</span> ";
-            if ($Me->contactId > 0) {
-                echo "<a class='q' href='", hoturl("profile"), "'><strong>",
+            $xsep = ' <span class="barsep">&nbsp;|&nbsp;</span> ';
+            if ($Me->has_email()) {
+                echo '<a class="q" href="', hoturl("profile"), '"><strong>',
                     htmlspecialchars($Me->email),
-                    "</strong></a> &nbsp; <a href='", hoturl("profile"), "'>Profile</a>",
+                    '</strong></a> &nbsp; <a href="', hoturl("profile"), '">Profile</a>',
                     $xsep;
             }
 
             // "act as" link
-            if (($actas = @$_SESSION["last_actas"])) {
+            if (($actas = @$_SESSION["last_actas"]) && @$_SESSION["trueuser"]) {
                 // Become true user if not currently chair.
-                if (!$Me->privChair || strcasecmp($Me->email, $actas) == 0) {
-                    $actas = explode(" ", $_SESSION["trueuser"]);
-                    $actas = $actas[2];
-                }
+                if (!$Me->privChair || strcasecmp($Me->email, $actas) == 0)
+                    $actas = $_SESSION["trueuser"]->email;
                 if (strcasecmp($Me->email, $actas) != 0)
                     echo "<a href=\"", selfHref(array("actas" => $actas)), "\">", ($Me->privChair ? htmlspecialchars($actas) : "Admin"), "&nbsp;", Ht::img("viewas.png", "Act as " . htmlspecialchars($actas)), "</a>", $xsep;
             }
 
             // help, sign out
             $x = ($id == "search" ? "t=$id" : ($id == "settings" ? "t=chair" : ""));
-            echo "<a href='", hoturl("help", $x), "'>Help</a>", $xsep;
-            if ($Me->contactId > 0 || isset($Opt["httpAuthLogin"]))
-                echo '<a href="', hoturl_post("index", "signout=1"), '">Sign&nbsp;out</a>';
-            else
-                echo '<a href="', hoturl("index", "signin=1"), '">Sign&nbsp;in</a>';
+            echo '<a href="', hoturl("help", $x), '">Help</a>';
+            if (!$Me->has_email() && !isset($Opt["httpAuthLogin"]))
+                echo $xsep, '<a href="', hoturl("index", "signin=1"), '">Sign&nbsp;in</a>';
+            if (!$Me->is_empty() || isset($Opt["httpAuthLogin"]))
+                echo $xsep, '<a href="', hoturl_post("index", "signout=1"), '">Sign&nbsp;out</a>';
         }
         echo "<div id='maindeadline' style='display:none'>";
 
@@ -2053,7 +2034,7 @@ class Conference {
 
         echo "</div></div>\n";
 
-        echo "  <div class='clear'></div>\n";
+        echo "  <hr class=\"c\" />\n";
 
         echo $actionBar;
 
@@ -2117,7 +2098,7 @@ class Conference {
             } else
                 echo "<!-- Version ", HOTCRP_VERSION, " -->";
         }
-        echo "</div>\n  <div class='clear'></div></div>\n";
+        echo "</div>\n  <hr class=\"c\" /></div>\n";
         echo $this->scriptStuff, Ht::take_stash(), "</body>\n</html>\n";
         $this->scriptStuff = "";
     }
@@ -2196,61 +2177,17 @@ class Conference {
     }
 
 
-    public function encode_capability($capid, $salt, $timeExpires, $save) {
+    public function capability_manager($for) {
         global $Opt;
-        list($keyid, $key) = Contact::password_hmac_key(null, true);
-        if (($hash_method = defval($Opt, "capabilityHashMethod")))
-            /* OK */;
-        else if (($hash_method = $this->setting_data("capabilityHashMethod")))
-            /* OK */;
-        else {
-            $hash_method = (PHP_INT_SIZE == 8 ? "sha512" : "sha256");
-            $this->save_setting("capabilityHashMethod", 1, $hash_method);
-        }
-        $text = substr(hash_hmac($hash_method, $capid . " " . $timeExpires . " " . $salt, $key, true), 0, 16);
-        if ($save)
-            $this->q("insert ignore into CapabilityMap (capabilityValue, capabilityId, timeExpires) values ('" . sqlq($text) . "', $capid, $timeExpires)");
-        return "1" . str_replace(array("+", "/", "="), array("-", "_", ""),
-                                 base64_encode($text));
+        if (@$Opt["contactdb_dsn"]
+            && ($cdb = Contact::contactdb())
+            && ((is_string($for) && substr($for, 0, 1) === "U")
+                || ($for instanceof Contact && $for->contactDbId)))
+            return new CapabilityManager($cdb, "U");
+        else
+            return new CapabilityManager($this->dblink, "");
     }
 
-    public function create_capability($capabilityType, $options = array()) {
-        $contactId = defval($options, "contactId", 0);
-        $paperId = defval($options, "paperId", 0);
-        $timeExpires = defval($options, "timeExpires", time() + 259200);
-        $salt = hotcrp_random_bytes(24);
-        $data = defval($options, "data");
-        $this->q("insert into Capability (capabilityType, contactId, paperId, timeExpires, salt, data) values ($capabilityType, $contactId, $paperId, $timeExpires, '" . sqlq($salt) . "', " . ($data === null ? "null" : "'" . sqlq($data) . "'") . ")");
-        $capid = $this->lastInsertId();
-        if (!$capid || !function_exists("hash_hmac"))
-            return false;
-        return $this->encode_capability($capid, $salt, $timeExpires, true);
-    }
-
-    public function check_capability($capabilityText) {
-        if ($capabilityText[0] != "1")
-            return false;
-        $value = base64_decode(str_replace(array("-", "_"), array("+", "/"),
-                                           substr($capabilityText, 1)));
-        if (strlen($value) >= 16
-            && ($result = $this->q("select * from CapabilityMap where capabilityValue='" . sqlq($value) . "'"))
-            && ($row = edb_orow($result))
-            && ($row->timeExpires == 0 || $row->timeExpires >= time())) {
-            $result = $this->q("select * from Capability where capabilityId=" . $row->capabilityId);
-            if (($row = edb_orow($result))) {
-                $row->capabilityValue = $value;
-                return $row;
-            }
-        }
-        return false;
-    }
-
-    public function delete_capability($capdata) {
-        if ($capdata) {
-            $this->q("delete from CapabilityMap where capabilityValue='" . sqlq($capdata->capabilityValue) . "'");
-            $this->q("delete from Capability where capabilityId=" . $capdata->capabilityId);
-        }
-    }
 
     public function message_name($name) {
         if (str_starts_with($name, "msg."))

@@ -225,7 +225,7 @@ class ContactList extends BaseList {
         case self::FIELD_AFFILIATION_ROW:
             return "Affiliation";
         case self::FIELD_LASTVISIT:
-            return "Last activity";
+            return '<span class="hastitle" title="Includes paper changes, review updates, and profile changes">Last update</span>';
         case self::FIELD_HIGHTOPICS:
             return "High-interest topics";
         case self::FIELD_LOWTOPICS:
@@ -369,8 +369,8 @@ class ContactList extends BaseList {
             $rids = explode(",", $row->reviewIds);
             $ords = explode(",", $row->reviewOrdinals);
             $spids = $pids;
-            ksort($spids, SORT_NUMERIC);
-            $extra = "&amp;ls=" . urlencode("p/s/" . join(" ", array_keys($spids)));
+            sort($spids, SORT_NUMERIC);
+            $extra = "&amp;ls=" . urlencode("p/s/" . join(" ", $spids));
             $m = array();
             for ($i = 0; $i != count($pids); ++$i) {
                 if ($ords[$i])
@@ -487,12 +487,11 @@ class ContactList extends BaseList {
         global $Conf;
 
         $aulimit = (strlen($this->limit) >= 2 && $this->limit[0] == 'a' && $this->limit[1] == 'u');
-        $qa = ($Conf->sversion >= 47 ? ", disabled" : ", 0 disabled");
         $pq = "select u.contactId,
         u.contactId as paperId,
         firstName, lastName, email, affiliation, roles, contactTags,
         voicePhoneNumber,
-        u.collaborators, lastLogin$qa";
+        u.collaborators, lastLogin, disabled";
         if (isset($queryOptions['topics']))
             $pq .= ",\n topicIds, topicInterest";
         if (isset($queryOptions["reviews"])) {
@@ -821,7 +820,7 @@ class ContactList extends BaseList {
         if ($this->listNumber) {
             $l = SessionList::create("u/" . $this->limit, $ids,
                                      ($listtitle ? $listtitle : "Users"),
-                                     "users$ConfSiteSuffix?t=$this->limit");
+                                     hoturl_site_relative_raw("users", "t=$this->limit"));
             SessionList::change($this->listNumber, $l);
         }
 

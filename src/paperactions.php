@@ -9,7 +9,7 @@ class PaperActions {
         global $Conf, $Me, $Error, $OK;
         $ajax = defval($_REQUEST, "ajax", false);
         if ($Me->canSetOutcome($prow)) {
-            $o = rcvtint($_REQUEST["decision"]);
+            $o = cvtint(@$_REQUEST["decision"]);
             $outcomes = $Conf->outcome_map();
             if (isset($outcomes[$o])) {
                 $result = $Conf->qe("update Paper set outcome=$o where paperId=$prow->paperId");
@@ -50,12 +50,9 @@ class PaperActions {
         global $Conf, $Me, $Error, $OK;
         $ajax = defval($_REQUEST, "ajax", false);
         if (!$Me->allowAdminister($prow)
-            || ($contactId = rcvtint($_REQUEST["reviewer"])) <= 0)
+            || ($contactId = cvtint(@$_REQUEST["reviewer"])) <= 0)
             $contactId = $Me->contactId;
-        if (!isset($_REQUEST["revpref"]))
-            error_log("GET=" . var_export($_GET, true) . ", POST=" . var_export($_POST, true));
-        $v = parse_preference($_REQUEST["revpref"]);
-        if ($v) {
+        if (isset($_REQUEST["revpref"]) && ($v = parse_preference($_REQUEST["revpref"]))) {
             if (self::save_review_preferences(array(array($prow->paperId, $contactId, $v[0], $v[1]))))
                 $Conf->confirmMsg($ajax ? "Saved" : "Review preference saved.");
             else
@@ -67,7 +64,7 @@ class PaperActions {
             $Error["revpref"] = true;
         }
         if ($ajax)
-            $Conf->ajaxExit(array("ok" => $OK && !defval($Error, "revpref"),
+            $Conf->ajaxExit(array("ok" => $OK && !@$Error["revpref"],
                                   "value" => $v));
     }
 
@@ -138,7 +135,7 @@ class PaperActions {
         global $Conf, $Me, $OK;
         $ajax = defval($_REQUEST, "ajax", 0);
         $cid = $Me->contactId;
-        if ($Me->privChair && ($x = rcvtint($_REQUEST["contactId"])) > 0)
+        if ($Me->privChair && ($x = cvtint(@$_REQUEST["contactId"])) > 0)
             $cid = $x;
         saveWatchPreference($prow->paperId, $cid, WATCHTYPE_COMMENT, defval($_REQUEST, "follow"));
         if ($OK)
@@ -208,14 +205,14 @@ class PaperActions {
         global $Conf, $Me, $Error, $OK;
         if (isset($_REQUEST["cancelsettags"]))
             return;
-        $ajax = defval($_REQUEST, "ajax", false);
+        $ajax = @$_REQUEST["ajax"];
         if ($Me->canSetTags($prow)) {
             $tagger = new Tagger;
             if (isset($_REQUEST["tags"]))
                 $tagger->save($prow->paperId, $_REQUEST["tags"], "p");
-            if (isset($_REQUEST["addtags"]))
+            if (@trim($_REQUEST["addtags"]) !== "")
                 $tagger->save($prow->paperId, $_REQUEST["addtags"], "a");
-            if (isset($_REQUEST["deltags"]))
+            if (@trim($_REQUEST["deltags"]) !== "")
                 $tagger->save($prow->paperId, $_REQUEST["deltags"], "d");
             $prow->load_tags();
             $tags_edit_text = $tagger->unparse($tagger->editable($prow->paperTags));
@@ -295,7 +292,7 @@ class PaperActions {
         while (($row = edb_row($result))) {
             $twiddle = strpos($row[0], "~");
             if ($twiddle === false
-                || ($twiddle == 0 && $row[0][1] == "~"))
+                || ($twiddle == 0 && $row[0][1] == "~" && $Me->privChair))
                 $tags[] = $row[0];
             else if ($twiddle > 0 && substr($row[0], 0, $twiddle) == $Me->contactId)
                 $tags[] = substr($row[0], $twiddle);
