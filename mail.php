@@ -5,11 +5,11 @@
 
 require_once("src/initweb.php");
 require_once("src/papersearch.php");
+require_once("src/mailclasses.php");
 if (!$Me->privChair && !$Me->isPC)
     $Me->escape();
 $checkReviewNeedsSubmit = false;
 $Error = $Warning = array();
-$pctags = pcTags();
 
 // load mail from log
 if (isset($_REQUEST["fromlog"]) && ctype_digit($_REQUEST["fromlog"])
@@ -39,8 +39,7 @@ if (!isset($_REQUEST["t"]) || !isset($tOpt[$_REQUEST["t"]]))
 
 // mailer
 $mailer_options = array("requester_contact" => $Me);
-$nullMailer = new Mailer(null, null, $mailer_options);
-$nullMailer->width = 10000000;
+$null_mailer = new HotCRPMailer(null, null, array_merge(array("width" => false), $mailer_options));
 
 // template options
 if (isset($_REQUEST["monreq"]))
@@ -84,287 +83,289 @@ else
 
 $subjectPrefix = "[" . $Opt["shortName"] . "] ";
 
-function contactQuery($type) {
-    global $Conf, $Me, $papersel, $checkReviewNeedsSubmit;
-    $contactInfo = "firstName, lastName, email, password, roles, ContactInfo.contactId, (PCMember.contactId is not null) as isPC, preferredEmail";
-    $paperInfo = "Paper.paperId, Paper.title, Paper.abstract, Paper.authorInformation, Paper.outcome, Paper.blind, Paper.timeSubmitted, Paper.timeWithdrawn, Paper.shepherdContactId, Paper.capVersion, Paper.managerContactId";
 
-    // paper limit
-    $where = array();
-    if ($type != "pc" && substr($type, 0, 3) != "pc:" && $type != "all" && isset($papersel))
-        $where[] = "Paper.paperId in (" . join(", ", $papersel) . ")";
+class MailSender {
 
-    if ($type == "s")
-        $where[] = "Paper.timeSubmitted>0";
-    else if ($type == "unsub")
-        $where[] = "Paper.timeSubmitted<=0 and Paper.timeWithdrawn<=0";
-    else if (substr($type, 0, 4) == "dec:") {
-        foreach ($Conf->outcome_map() as $num => $what)
-            if (strcasecmp($what, substr($type, 4)) == 0) {
-                $where[] = "Paper.timeSubmitted>0 and Paper.outcome=$num";
-                break;
+    private $recip;
+    private $sending;
+
+    private $started = false;
+    private $mcount = 0;
+    private $mrecipients = array();
+    private $mpapers = array();
+    private $cbcount = 0;
+    private $mailid_text = "";
+
+    function __construct($recip, $sending) {
+        $this->recip = $recip;
+        $this->sending = $sending;
+    }
+
+    static function check($recip) {
+        $ms = new MailSender($recip, false);
+        $ms->run();
+    }
+
+    static function send($recip) {
+        $ms = new MailSender($recip, true);
+        $ms->run();
+    }
+
+    private function echo_prologue() {
+        global $Conf, $Me;
+        if ($this->started)
+            return;
+        echo Ht::form_div(hoturl_post("mail"));
+        foreach (array("recipients", "subject", "emailBody", "cc", "replyto", "q", "t", "plimit") as $x)
+            if (isset($_REQUEST[$x]))
+                echo Ht::hidden($x, $_REQUEST[$x]);
+        if ($this->sending) {
+            echo "<div id='foldmail' class='foldc fold2c'>",
+                "<div class='fn fx2 merror'>In the process of sending mail.  <strong>Do not leave this page until this message disappears!</strong><br /><span id='mailcount'></span></div>",
+                "<div id='mailwarnings'></div>",
+                "<div class='fx'><div class='confirm'>Sent mail as follows.</div>",
+                "<div class='aa'>",
+                Ht::submit("go", "Prepare more mail"),
+                "</div></div>",
+                // This next is only displayed when Javascript is off
+                "<div class='fn2 warning'>Sending mail. <strong>Do not leave this page until it finishes rendering!</strong></div>",
+                "</div>";
+        } else {
+            if (isset($_REQUEST["emailBody"]) && $Me->privChair
+                && (strpos($_REQUEST["emailBody"], "%REVIEWS%")
+                    || strpos($_REQUEST["emailBody"], "%COMMENTS%"))) {
+                if (!$Conf->timeAuthorViewReviews())
+                    echo "<div class='warning'>Although these mails contain reviews and/or comments, authors can’t see reviews or comments on the site. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change this setting</a>)</div>\n";
+                else if (!$Conf->timeAuthorViewReviews(true))
+                    echo "<div class='warning'>Mails to users who have not completed their own reviews will not include reviews or comments. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change the setting</a>)</div>\n";
             }
-        if (!count($where))
-            return "";
-    }
-
-    // reviewer limit
-    if ($type == "myuncextrev")
-        $type = "uncmyextrev";
-    $isreview = false;
-    if (preg_match('_\A(new|unc|c|)(pc|ext|myext|)rev\z_', $type, $m)) {
-        $isreview = true;
-        // Submission status
-        if ($m[1] == "c")
-            $where[] = "PaperReview.reviewSubmitted>0";
-        else if ($m[1] == "unc" || $m[1] == "new")
-            $where[] = "PaperReview.reviewSubmitted is null and PaperReview.reviewNeedsSubmit!=0";
-        if ($m[1] == "new")
-            $where[] = "PaperReview.timeRequested>PaperReview.timeRequestNotified";
-        // Withdrawn papers may not count
-        if ($m[1] == "unc" || $m[1] == "new")
-            $where[] = "Paper.timeSubmitted>0";
-        else if ($m[1] == "")
-            $where[] = "(Paper.timeSubmitted>0 or PaperReview.reviewSubmitted>0)";
-        // Review type
-        if ($m[2] == "ext" || $m[2] == "myext")
-            $where[] = "PaperReview.reviewType=" . REVIEW_EXTERNAL;
-        else if ($m[2] == "pc")
-            $where[] = "PaperReview.reviewType>" . REVIEW_EXTERNAL;
-        if ($m[2] == "myext")
-            $where[] = "PaperReview.requestedBy=" . $Me->contactId;
-    }
-
-    // build query
-    if ($type == "all") {
-        $q = "select $contactInfo, 0 as conflictType, -1 as paperId from ContactInfo left join PCMember using (contactId)";
-        $orderby = "email";
-    } else if ($type == "pc" || substr($type, 0, 3) == "pc:") {
-        $q = "select $contactInfo, 0 as conflictType, -1 as paperId from ContactInfo join PCMember using (contactId)";
-        $orderby = "email";
-        if ($type != "pc")
-            $where[] = "ContactInfo.contactTags like '% " . sqlq_for_like(substr($type, 3)) . " %'";
-    } else if ($isreview) {
-        $q = "select $contactInfo, 0 as conflictType, $paperInfo, PaperReview.reviewType, PaperReview.reviewType as myReviewType from PaperReview join Paper using (paperId) join ContactInfo using (contactId) left join PCMember on (PCMember.contactId=ContactInfo.contactId)";
-        $orderby = "email, Paper.paperId";
-    } else if ($type == "lead" || $type == "shepherd") {
-        $q = "select $contactInfo, conflictType, $paperInfo, PaperReview.reviewType, PaperReview.reviewType as myReviewType from Paper join ContactInfo on (ContactInfo.contactId=Paper.${type}ContactId) left join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId) left join PaperConflict on (PaperConflict.paperId=Paper.paperId and PaperConflict.contactId=ContactInfo.contactId) left join PCMember on (PCMember.contactId=ContactInfo.contactId)";
-        $orderby = "email, Paper.paperId";
-    } else {
-        if (!$Conf->timeAuthorViewReviews(true) && $Conf->timeAuthorViewReviews()) {
-            $qa = ", reviewNeedsSubmit";
-            $qb = " left join (select contactId, max(reviewNeedsSubmit) as reviewNeedsSubmit from PaperReview group by PaperReview.contactId) as PaperReview using (contactId)";
-            $checkReviewNeedsSubmit = true;
-        } else
-            $qa = $qb = "";
-        $q = "select $contactInfo$qa, PaperConflict.conflictType, $paperInfo, 0 as myReviewType from Paper left join PaperConflict using (paperId) join ContactInfo using (contactId)$qb left join PCMember on (PCMember.contactId=ContactInfo.contactId)";
-        $where[] = "PaperConflict.conflictType>=" . CONFLICT_AUTHOR;
-        $orderby = "email, Paper.paperId";
-    }
-
-    $where[] = "email not regexp '^anonymous[0-9]*\$'";
-    return $q . " where " . join(" and ", $where) . " order by " . $orderby;
-}
-
-function checkMailPrologue($send) {
-    global $Conf, $Me, $recip;
-    echo Ht::form_div(hoturl_post("mail"));
-    foreach (array("recipients", "subject", "emailBody", "cc", "replyto", "q", "t", "plimit") as $x)
-        if (isset($_REQUEST[$x]))
-            echo Ht::hidden($x, $_REQUEST[$x]);
-    if ($send) {
-        echo "<div id='foldmail' class='foldc fold2c'>",
-            "<div class='fn fx2 merror'>In the process of sending mail.  <strong>Do not leave this page until this message disappears!</strong><br /><span id='mailcount'></span></div>",
-            "<div id='mailwarnings'></div>",
-            "<div class='fx'><div class='confirm'>Sent mail as follows.</div>
-        <div class='aa'>",
-            Ht::submit("go", "Prepare more mail"), "</div></div>",
-            // This next is only displayed when Javascript is off
-            "<div class='fn2 warning'>Sending mail. <strong>Do not leave this page until it finishes rendering!</strong></div>",
-            "</div>";
-    } else {
-        if (isset($_REQUEST["emailBody"]) && $Me->privChair
-            && (strpos($_REQUEST["emailBody"], "%REVIEWS%")
-                || strpos($_REQUEST["emailBody"], "%COMMENTS%"))) {
-            if (!$Conf->timeAuthorViewReviews())
-                echo "<div class='warning'>Although these mails contain reviews and/or comments, authors can’t see reviews or comments on the site. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change this setting</a>)</div>\n";
-            else if (!$Conf->timeAuthorViewReviews(true))
-                echo "<div class='warning'>Mails to users who have not completed their own reviews will not include reviews or comments. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change the setting</a>)</div>\n";
+            if (isset($_REQUEST["emailBody"]) && $Me->privChair
+                && substr($_REQUEST["recipients"], 0, 4) == "dec:") {
+                if (!$Conf->timeAuthorViewDecision())
+                    echo "<div class='warning'>You appear to be sending an acceptance or rejection notification, but authors can’t see paper decisions on the site. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change this setting</a>)</div>\n";
+            }
+            echo "<div id='foldmail' class='foldc fold2c'>",
+                "<div class='fn fx2 warning'>In the process of preparing mail.  You will be able to send the prepared mail once this message disappears.<br /><span id='mailcount'></span></div>",
+                "<div id='mailwarnings'></div>",
+                "<div class='fx info'>Verify that the mails look correct, then select “Send” to send the checked mails.<br />",
+                "Mailing to:&nbsp;", $this->recip->unparse(),
+                "<span id='mailinfo'></span>";
+            if (!preg_match('/\A(?:pc\z|pc:|all\z)/', $_REQUEST["recipients"])
+                && defval($_REQUEST, "plimit") && $_REQUEST["q"] !== "")
+                echo "<br />Paper selection:&nbsp;", htmlspecialchars($_REQUEST["q"]);
+            echo "</div><div class='aa fx'>", Ht::submit("send", "Send"),
+                " &nbsp; ", Ht::submit("cancel", "Cancel"), "</div>",
+                // This next is only displayed when Javascript is off
+                "<div class='fn2 warning'>Scroll down to send the prepared mail once the page finishes loading.</div>",
+                "</div>\n";
         }
-        if (isset($_REQUEST["emailBody"]) && $Me->privChair
-            && substr($_REQUEST["recipients"], 0, 4) == "dec:") {
-            if (!$Conf->timeAuthorViewDecision())
-                echo "<div class='warning'>You appear to be sending an acceptance or rejection notification, but authors can’t see paper decisions on the site. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change this setting</a>)</div>\n";
+        $Conf->echoScript("fold('mail',0,2)");
+        $this->started = true;
+    }
+
+    private function echo_mailinfo() {
+        global $Conf;
+        if (!$this->sending) {
+            $m = plural($this->mcount, "mail") . ", "
+                . plural($this->mrecipients, "recipient");
+            if (count($this->mpapers) != 0)
+                $m .= ", " . plural($this->mpapers, "paper");
+            $Conf->echoScript("\$\$('mailinfo').innerHTML=\" <span class='barsep'>|</span> " . $m . "\";");
         }
-        echo "<div id='foldmail' class='foldc fold2c'>",
-            "<div class='fn fx2 warning'>In the process of preparing mail.  You will be able to send the prepared mail once this message disappears.<br /><span id='mailcount'></span></div>",
-            "<div id='mailwarnings'></div>",
-            "<div class='fx info'>Verify that the mails look correct, then select “Send” to send the checked mails.<br />",
-            "Mailing to:&nbsp;", $recip[$_REQUEST["recipients"]], "<span id='mailinfo'></span>";
-        if (!preg_match('/\A(?:pc\z|pc:|all\z)/', $_REQUEST["recipients"])
-            && defval($_REQUEST, "plimit") && $_REQUEST["q"] !== "")
-            echo "<br />Paper selection:&nbsp;", htmlspecialchars($_REQUEST["q"]);
-        echo "</div><div class='aa fx'>", Ht::submit("send", "Send"),
-            " &nbsp; ", Ht::submit("cancel", "Cancel"), "</div>",
-            // This next is only displayed when Javascript is off
-            "<div class='fn2 warning'>Scroll down to send the prepared mail once the page finishes loading.</div>",
-            "</div>\n";
     }
-    $Conf->echoScript("fold('mail',0,2)");
-}
 
-function echo_mailinfo($mcount, $mrecipients, $mpapers) {
-    global $Conf;
-    $m = plural($mcount, "mail") . ", " . plural($mrecipients, "recipient");
-    if (count($mpapers) != 0)
-        $m .= ", " . plural($mpapers, "paper");
-    $Conf->echoScript("\$\$('mailinfo').innerHTML=\" <span class='barsep'>|</span> " . $m . "\";");
-}
-
-function checkMail($send) {
-    global $Conf, $Opt, $Me, $Error, $subjectPrefix, $recip,
-        $checkReviewNeedsSubmit, $mailer_options;
-    $q = contactQuery($_REQUEST["recipients"]);
-    if (!$q)
-        return $Conf->errorMsg("Bad recipients value");
-    $result = $Conf->qe($q);
-    if (!$result)
-        return;
-
-    $subject = trim(defval($_REQUEST, "subject", ""));
-    if (substr($subject, 0, strlen($subjectPrefix)) != $subjectPrefix)
-        $subject = $subjectPrefix . $subject;
-    if ($send) {
-        $mailId = "";
-        $q = "recipients='" . sqlq($_REQUEST["recipients"])
-            . "', cc='" . sqlq($_REQUEST["cc"])
-            . "', replyto='" . sqlq($_REQUEST["replyto"])
-            . "', subject='" . sqlq($_REQUEST["subject"])
-            . "', emailBody='" . sqlq($_REQUEST["emailBody"]) . "'";
-        if ($Conf->sversion >= 79)
-            $q .= ", q='" . sqlq($_REQUEST["q"]) . "', t='" . sqlq($_REQUEST["t"]) . "'";
-        if (($log_result = Dbl::real_query("insert into MailLog set $q")))
-            $mailId = " #" . $log_result->insert_id;
-        $Me->log_activity("Sending mail$mailId \"$subject\"");
+    private static function fix_body($prep) {
+        if (preg_match('^\ADear (author|reviewer)\(s\)([,;!.\s].*)\z^s', $prep->body, $m))
+            $prep->body = "Dear " . $m[1] . (count($prep->to) == 1 ? "" : "s") . $m[2];
     }
-    $emailBody = $_REQUEST["emailBody"];
 
-    $template = array("subject" => $subject, "body" => $emailBody);
-    $rest = array("cc" => $_REQUEST["cc"], "replyto" => $_REQUEST["replyto"],
-                  "error" => false, "mstate" => new MailerState());
-    $rest = array_merge($rest, $mailer_options);
-    $last = array("subject" => "", "body" => "", "to" => "");
-    $any = false;
-    $mcount = 0;
-    $mrecipients = array();
-    $mpapers = array();
-    $nrows_left = edb_nrows($result);
-    $nrows_print = false;
-    $nwarnings = 0;
-    $cbcount = 0;
-    $preperrors = array();
-    $revinform = ($_REQUEST["recipients"] == "newpcrev" ? array() : null);
-    while (($row = PaperInfo::fetch($result, $Me))) {
-        $nrows_left--;
-        if ($nrows_left % 5 == 0)
-            $nrows_print = true;
-        $contact = Contact::make($row);
-        $rest["hideReviews"] = $checkReviewNeedsSubmit && $row->reviewNeedsSubmit;
-        $rest["error"] = false;
-        $preparation = Mailer::prepareToSend($template, $row, $contact, $rest); // see also $show_preparation below
-        if ($rest["error"] !== false) {
-            $Error[$rest["error"]] = true;
-            $emsg = "This " . Mailer::$mailHeaders[$rest["error"]] . " field isn’t a valid email list: <blockquote><tt>" . htmlspecialchars($rest[$rest["error"]]) . "</tt></blockquote>  Make sure email address are separated by commas.  When mixing names and email addresses, try putting names in \"quotes\" and email addresses in &lt;angle brackets&gt;.";
-            if (!isset($preperrors[$emsg]))
-                $Conf->errorMsg($emsg);
-            $preperrors[$emsg] = true;
-        } else if ($preparation["subject"] != $last["subject"]
-                   || $preparation["body"] != $last["body"]
-                   || $preparation["to"] != $last["to"]
-                   || @$preparation["cc"] != @$last["cc"]
-                   || @$preparation["replyto"] != @$last["replyto"]) {
-            $last = $preparation;
-            $checker = "c" . $row->contactId . "p" . $row->paperId;
-            if ($send && !defval($_REQUEST, $checker))
-                continue;
-            if (!$any) {
-                checkMailPrologue($send);
-                $any = true;
-            }
-            if ($send) {
-                Mailer::sendPrepared($preparation);
-                $Conf->log("Account was sent mail$mailId", $row->contactId, $row->paperId);
-            }
-            ++$mcount;
-            $mrecipients[$preparation["to"]] = true;
-            if ($row->paperId >= 0)
-                $mpapers[$row->paperId] = true;
-            if ($nrows_print) {
-                $Conf->echoScript("\$\$('mailcount').innerHTML=\"$nrows_left mails remaining.\";");
-                echo_mailinfo($mcount, $mrecipients, $mpapers);
-                $nrows_print = false;
-            }
+    private function send_prep($prep) {
+        global $Conf, $Opt;
 
-            // hide passwords from non-chair users
-            if ($Me->privChair && !@$Opt["chairHidePasswords"])
-                $show_preparation = $preparation;
-            else {
-                $rest["sensitivity"] = "display";
-                $show_preparation = Mailer::prepareToSend($template, $row, $contact, $rest);
-                unset($rest["sensitivity"]);
-            }
+        $cbkey = "c" . join("_", $prep->contacts) . "p" . $prep->paperId;
+        if ($this->sending && !defval($_REQUEST, $cbkey))
+            return;
+        $this->echo_prologue();
 
-            echo "<div class='mail'><table>";
-            $nprintrows = 0;
-            foreach (array("fullTo" => "To", "cc" => "Cc", "bcc" => "Bcc",
-                           "replyto" => "Reply-To", "subject" => "Subject") as $k => $t)
-                if (isset($show_preparation[$k])) {
-                    echo " <tr>";
-                    if (++$nprintrows > 1)
-                        echo "<td class='mhpad'></td>";
-                    else if ($send)
-                        echo "<td class='mhx'></td>";
-                    else {
-                        ++$cbcount;
-                        echo "<td class='mhcb'><input type='checkbox' class='cb' name='$checker' value='1' checked='checked' id='psel$cbcount' onclick='pselClick(event,this)' /></td>";
-                    }
-                    $x = htmlspecialchars(Mailer::mimeHeaderUnquote($show_preparation[$k]));
-                    echo "<td class='mhnp'>", $t, ":</td><td class='mhdp'>", $x, "</td></tr>\n";
+        self::fix_body($prep);
+        ++$this->mcount;
+        if ($this->sending) {
+            Mailer::send_preparation($prep);
+            foreach ($prep->contacts as $cid)
+                $Conf->log("Account was sent mail" . $this->mailid_text, $cid, $prep->paperId);
+        }
+
+        // hide passwords from non-chair users
+        $show_prep = $prep;
+        if (@$prep->sensitive) {
+            $show_prep = $prep->sensitive;
+            $show_prep->to = $prep->to;
+            self::fix_body($show_prep);
+        }
+
+        echo '<div class="mail"><table>';
+        $nprintrows = 0;
+        foreach (array("to", "cc", "bcc", "reply-to", "subject") as $k) {
+            if ($k == "to")
+                $line = "To: " . join(", ", $show_prep->to);
+            else if ($k == "subject")
+                $line = "Subject: " . $show_prep->$k;
+            else
+                $line = @$show_prep->headers[$k];
+            if ($line) {
+                echo " <tr>";
+                if (++$nprintrows > 1)
+                    echo "<td class='mhpad'></td>";
+                else if ($this->sending)
+                    echo "<td class='mhx'></td>";
+                else {
+                    ++$this->cbcount;
+                    echo "<td class='mhcb'><input type='checkbox' class='cb' name='$cbkey' value='1' checked='checked' id='psel", $this->cbcount, "' onclick='pselClick(event,this)' /></td>";
                 }
+                $v = substr($line, strlen($k) + 2);
+                echo '<td class="mhnp">', substr($line, 0, strlen($k)), ":</td>",
+                    '<td class="mhdp">',
+                    htmlspecialchars(MimeText::decode_header($v)),
+                    "</td></tr>\n";
+            }
+        }
 
-            echo " <tr><td></td><td></td><td class='mhb'><pre class='email'>",
-                preg_replace(',https?://\S+,', '<a href="$0">$0</a>', htmlspecialchars($show_preparation["body"])),
-                "</pre></td></tr>\n",
-                "<tr><td class='mhpad'></td><td></td><td class='mhpad'></td></tr>",
-                "</table></div>\n";
-        }
-        if ($nwarnings != $rest["mstate"]->nwarnings()) {
-            $nwarnings = $rest["mstate"]->nwarnings();
-            echo "<div id='foldmailwarn$nwarnings' class='hidden'><div class='warning'>", join("<br />", $rest["mstate"]->warnings()), "</div></div>";
-            $Conf->echoScript("\$\$('mailwarnings').innerHTML = \$\$('foldmailwarn$nwarnings').innerHTML;");
-        }
-        if ($send && $revinform !== null)
-            $revinform[] = "(paperId=$row->paperId and contactId=$row->contactId)";
+        echo " <tr><td></td><td></td><td class='mhb'><pre class='email'>",
+            preg_replace(',https?://\S+,', '<a href="$0">$0</a>', htmlspecialchars($show_prep->body)),
+            "</pre></td></tr>\n",
+            "<tr><td class='mhpad'></td><td></td><td class='mhpad'></td></tr>",
+            "</table></div>\n";
     }
 
-    echo_mailinfo($mcount, $mrecipients, $mpapers);
+    private function process_prep($prep, &$last_prep, $row) {
+        global $Me, $Opt;
+        $mail_differs = ($prep->subject != $last_prep->subject
+                         || $prep->body != $last_prep->body
+                         || @$prep->headers["cc"] != @$last_prep->headers["cc"]
+                         || @$prep->headers["reply-to"] != @$last_prep->headers["reply-to"]
+                         || $row->paperId != $last_prep->paperId);
+        $prep_to = $prep->to;
 
-    if (!$any && !count($preperrors))
-        return $Conf->errorMsg("No users match “" . $recip[$_REQUEST["recipients"]] . "” for that search.");
-    else if (!$any)
-        return false;
-    else if (!$send) {
-        echo "<div class='aa'>",
-            Ht::submit("send", "Send"), " &nbsp; ", Ht::submit("cancel", "Cancel"),
-            "</div>\n";
+        if ($mail_differs) {
+            if (!@$last_prep->fake)
+                $this->send_prep($last_prep);
+            $last_prep = $prep;
+            $last_prep->contacts = array();
+            $last_prep->paperId = $row->paperId;
+            $last_prep->to = array();
+        }
+
+        if (@$prep->fake || isset($last_prep->contacts[$row->contactId]))
+            return false;
+
+        $last_prep->contacts[$row->contactId] = $row->contactId;
+        $this->mrecipients[$row->contactId] = true;
+        $last_prep->to[] = $prep_to;
+        return true;
     }
-    if ($revinform)
-        $Conf->qe("update PaperReview set timeRequestNotified=" . time() . " where " . join(" or ", $revinform));
-    echo "</div></form>";
-    $Conf->echoScript("fold('mail', null);");
-    $Conf->footer();
-    exit;
+
+    private function run() {
+        global $Conf, $Opt, $Me, $Error, $subjectPrefix,
+            $checkReviewNeedsSubmit, $mailer_options;
+        $q = $this->recip->query();
+        if (!$q)
+            return $Conf->errorMsg("Bad recipients value");
+        $result = $Conf->qe($q);
+        if (!$result)
+            return;
+
+        $subject = trim(defval($_REQUEST, "subject", ""));
+        if (substr($subject, 0, strlen($subjectPrefix)) != $subjectPrefix)
+            $subject = $subjectPrefix . $subject;
+        if ($this->sending) {
+            $q = "recipients='" . sqlq($_REQUEST["recipients"])
+                . "', cc='" . sqlq($_REQUEST["cc"])
+                . "', replyto='" . sqlq($_REQUEST["replyto"])
+                . "', subject='" . sqlq($_REQUEST["subject"])
+                . "', emailBody='" . sqlq($_REQUEST["emailBody"]) . "'";
+            if ($Conf->sversion >= 79)
+                $q .= ", q='" . sqlq($_REQUEST["q"]) . "', t='" . sqlq($_REQUEST["t"]) . "'";
+            if (($log_result = Dbl::real_query("insert into MailLog set $q")))
+                $this->mailid_text = " #" . $log_result->insert_id;
+            $Me->log_activity("Sending mail$this->mailid_text \"$subject\"");
+        }
+        $emailBody = $_REQUEST["emailBody"];
+
+        $template = array("subject" => $subject, "body" => $emailBody);
+        $rest = array("cc" => $_REQUEST["cc"], "reply-to" => $_REQUEST["replyto"],
+                      "no_error_quit" => true);
+        $rest = array_merge($rest, $mailer_options);
+        $mailer = new HotCRPMailer;
+        $fake_prep = (object) array("subject" => "", "body" => "", "to" => array(),
+                                    "paperId" => -1, "contactId" => array(), "fake" => 1);
+        $last_prep = $fake_prep;
+        $nrows_done = 0;
+        $nrows_left = edb_nrows($result);
+        $nwarnings = 0;
+        $preperrors = array();
+        $revinform = ($_REQUEST["recipients"] == "newpcrev" ? array() : null);
+        while (($row = PaperInfo::fetch($result, $Me))) {
+            ++$nrows_done;
+            if ($nrows_done % 5 == 0) {
+                $Conf->echoScript("\$\$('mailcount').innerHTML=\"" . round(100 * $nrows_done / $nrows_left) . "% done.\";");
+                $this->echo_mailinfo();
+            }
+
+            $contact = Contact::make($row);
+            $rest["hideReviews"] = $checkReviewNeedsSubmit && $row->reviewNeedsSubmit;
+            $mailer->reset($contact, $row, $rest);
+            $prep = $mailer->make_preparation($template, $rest);
+
+            if (@$prep->errors) {
+                foreach ($prep->errors as $lcfield => $hline) {
+                    $reqfield = ($lcfield == "reply-to" ? "replyto" : $lcfield);
+                    $Error[$reqfield] = true;
+                    $emsg = Mailer::$email_fields[$lcfield] . " destination isn’t a valid email list: <blockquote><tt>" . htmlspecialchars($hline) . "</tt></blockquote> Make sure email address are separated by commas; put names in \"quotes\" and email addresses in &lt;angle brackets&gt;.";
+                    if (!isset($preperrors[$emsg]))
+                        $Conf->errorMsg($emsg);
+                    $preperrors[$emsg] = true;
+                }
+            } else if ($this->process_prep($prep, $last_prep, $row)) {
+                if ((!$Me->privChair || @$Opt["chairHidePasswords"])
+                    && !@$last_prep->sensitive) {
+                    $srest = array_merge($rest, array("sensitivity" => "display"));
+                    $mailer->reset($contact, $row, $srest);
+                    $last_prep->sensitive = $mailer->make_preparation($template, $srest);
+                }
+            }
+
+            if ($nwarnings != $mailer->nwarnings()) {
+                $this->echo_prologue();
+                $nwarnings = $mailer->nwarnings();
+                echo "<div id='foldmailwarn$nwarnings' class='hidden'><div class='warning'>", join("<br />", $mailer->warnings()), "</div></div>";
+                $Conf->echoScript("\$\$('mailwarnings').innerHTML = \$\$('foldmailwarn$nwarnings').innerHTML;");
+            }
+            if ($this->sending && $revinform !== null)
+                $revinform[] = "(paperId=$row->paperId and contactId=$row->contactId)";
+        }
+
+        $this->process_prep($fake_prep, $last_prep, (object) array("paperId" => -1));
+        $this->echo_mailinfo();
+
+        if (!$this->started && !count($preperrors))
+            return $Conf->errorMsg("No users match “" . $this->recip->unparse() . "” for that search.");
+        else if (!$this->started)
+            return false;
+        else if (!$this->sending) {
+            echo "<div class='aa'>",
+                Ht::submit("send", "Send"), " &nbsp; ", Ht::submit("cancel", "Cancel"),
+                "</div>\n";
+        }
+        if ($revinform)
+            $Conf->qe("update PaperReview set timeRequestNotified=" . time() . " where " . join(" or ", $revinform));
+        echo "</div></form>";
+        $Conf->echoScript("fold('mail', null);");
+        $Conf->footer();
+        exit;
+    }
+
 }
+
 
 // Check paper outcome counts
 $result = $Conf->q("select outcome, count(paperId), max(leadContactId), max(shepherdContactId) from Paper group by outcome");
@@ -388,75 +389,20 @@ if (defval($_REQUEST, "loadtmpl")) {
     $_REQUEST["recipients"] = defval($template, "mailtool_recipients", "s");
     if (isset($template["mailtool_search_type"]))
         $_REQUEST["t"] = $template["mailtool_search_type"];
-    if ($_REQUEST["recipients"] == "dec:no") {
-        $outcomes = $Conf->outcome_map();
-        $x = min(array_keys($outcomes));
-        foreach ($noutcome as $o => $n)
-            if ($o < 0 && $n > defval($noutcome, $x))
-                $x = $o;
-        $_REQUEST["recipients"] = "dec:" . $outcomes[$x];
-    } else if ($_REQUEST["recipients"] == "dec:yes") {
-        $outcomes = $Conf->outcome_map();
-        $x = max(array_keys($outcomes));
-        foreach ($noutcome as $o => $n)
-            if ($o > 0 && $n > defval($noutcome, $x))
-                $x = $o;
-        $_REQUEST["recipients"] = "dec:" . $outcomes[$x];
-    }
-    $_REQUEST["subject"] = $nullMailer->expand($template["subject"]);
-    $_REQUEST["emailBody"] = $nullMailer->expand($template["body"]);
+    $_REQUEST["subject"] = $null_mailer->expand($template["subject"]);
+    $_REQUEST["emailBody"] = $null_mailer->expand($template["body"]);
 }
 
 
 // Set recipients list, now that template is loaded
-$recip = array();
-if ($Me->privChair) {
-    $recip["au"] = "All contact authors";
-    $recip["s"] = "Contact authors of submitted papers";
-    $recip["unsub"] = "Contact authors of unsubmitted papers";
-    foreach ($Conf->outcome_map() as $num => $what) {
-        $name = "dec:$what";
-        if ($num && (defval($noutcome, $num) > 0
-                     || defval($_REQUEST, "recipients", "") == $name))
-            $recip[$name] = "Contact authors of " . htmlspecialchars($what) . " papers";
-    }
-    $recip["rev"] = "Reviewers";
-    $recip["crev"] = "Reviewers with complete reviews";
-    $recip["uncrev"] = "Reviewers with incomplete reviews";
-    $recip["pcrev"] = "PC reviewers";
-    $recip["uncpcrev"] = "PC reviewers with incomplete reviews";
-    $result = $Conf->q("select paperId from PaperReview where reviewType>=" . REVIEW_PC . " and timeRequested>timeRequestNotified and reviewSubmitted is null and reviewNeedsSubmit!=0");
-    if (edb_nrows($result) > 0)
-        $recip["newpcrev"] = "PC reviewers with new review assignments";
-    $recip["extrev"] = "External reviewers";
-    $recip["uncextrev"] = "External reviewers with incomplete reviews";
-    if ($anyLead)
-        $recip["lead"] = "Discussion leads";
-    if ($anyShepherd)
-        $recip["shepherd"] = "Shepherds";
-}
-$recip["myextrev"] = "Your requested reviewers";
-$recip["uncmyextrev"] = "Your requested reviewers with incomplete reviews";
-$recip["pc"] = "Program committee";
-if (count($pctags)) {
-    foreach ($pctags as $t)
-        if ($t != "pc")
-            $recip["pc:$t"] = "PC members tagged &ldquo;$t&rdquo;";
-}
-if ($Me->privChair)
-    $recip["all"] = "All users";
-
-if (@$_REQUEST["recipients"] == "myuncextrev")
-    $_REQUEST["recipients"] = "uncmyextrev";
-if (!isset($_REQUEST["recipients"]) || !isset($recip[$_REQUEST["recipients"]]))
-    $_REQUEST["recipients"] = key($recip);
+$recip = new MailRecipients($Me, @$_REQUEST["recipients"]);
 
 
 // Set subject and body if necessary
 if (!isset($_REQUEST["subject"]))
-    $_REQUEST["subject"] = $nullMailer->expand($mailTemplates["genericmailtool"]["subject"]);
+    $_REQUEST["subject"] = $null_mailer->expand($mailTemplates["genericmailtool"]["subject"]);
 if (!isset($_REQUEST["emailBody"]))
-    $_REQUEST["emailBody"] = $nullMailer->expand($mailTemplates["genericmailtool"]["body"]);
+    $_REQUEST["emailBody"] = $null_mailer->expand($mailTemplates["genericmailtool"]["body"]);
 if (substr($_REQUEST["subject"], 0, strlen($subjectPrefix)) == $subjectPrefix)
     $_REQUEST["subject"] = substr($_REQUEST["subject"], strlen($subjectPrefix));
 if (isset($_REQUEST["cc"]) && $Me->privChair)
@@ -475,11 +421,11 @@ else
 if (defval($_REQUEST, "loadtmpl"))
     /* do nothing */;
 else if (defval($_REQUEST, "check") && check_post())
-    checkMail(0);
+    MailSender::check($recip);
 else if (defval($_REQUEST, "cancel"))
     /* do nothing */;
 else if (defval($_REQUEST, "send") && check_post())
-    checkMail(1);
+    MailSender::send($recip);
 
 
 if (isset($_REQUEST["monreq"])) {
@@ -490,7 +436,7 @@ if (isset($_REQUEST["monreq"])) {
     else {
         echo "<h2>Requested reviews</h2>\n\n", $ptext, "<div class='info'>";
         if ($plist->any->need_review)
-            echo "Some of your requested external reviewers have not completed their reviews.  To send them an email reminder, check the text below and then select &ldquo;Prepare mail.&rdquo;  You'll get a chance to review the emails and select specific reviewers to remind.";
+            echo "Some of your requested external reviewers have not completed their reviews.  To send them an email reminder, check the text below and then select &ldquo;Prepare mail.&rdquo;  You’ll get a chance to review the emails and select specific reviewers to remind.";
         else
             echo "All of your requested external reviewers have completed their reviews.  <a href='", hoturl("index"), "'>Return home</a>";
         echo "</div>\n";
@@ -527,7 +473,7 @@ echo Ht::select("template", $tmpl, $_REQUEST["template"], array("onchange" => "h
 
 <div class='mail' style='float:left;margin:4px 1em 12px 0'><table>
  <tr><td class='mhnp'>To:</td><td class='mhdd'>",
-    Ht::select("recipients", $recip, $_REQUEST["recipients"], array("id" => "recipients", "onchange" => "setmailpsel(this)")),
+    $recip->selectors(),
     "<div class='g'></div>\n";
 
 // paper selection
@@ -553,13 +499,14 @@ echo "Search&nbsp; <input id='q' class='",
 $Conf->footerScript("mktemptext('q','(All)')");
 
 if ($Me->privChair) {
-    foreach (Mailer::$mailHeaders as $n => $t)
-        if ($n != "bcc") {
-            $ec = (isset($Error[$n]) ? " error" : "");
-            echo "  <tr><td class='mhnp$ec'>$t:</td><td class='mhdp$ec'>",
-                "<input type='text' class='textlite-tt' name='$n' value=\"",
-                htmlspecialchars($_REQUEST[$n]), "\" size='64' />",
-                ($n == "replyto" ? "<div class='g'></div>" : ""),
+    foreach (Mailer::$email_fields as $lcfield => $field)
+        if ($lcfield !== "to" && $lcfield !== "bcc") {
+            $xfield = ($lcfield == "reply-to" ? "replyto" : $lcfield);
+            $ec = (isset($Error[$xfield]) ? " error" : "");
+            echo "  <tr><td class='mhnp$ec'>$field:</td><td class='mhdp$ec'>",
+                "<input type='text' class='textlite-tt' name='$xfield' value=\"",
+                htmlspecialchars($_REQUEST[$xfield]), "\" size='64' />",
+                ($xfield == "replyto" ? "<div class='g'></div>" : ""),
                 "</td></tr>\n\n";
         }
 }
@@ -589,7 +536,7 @@ if ($Me->privChair) {
 
 
 echo "<div class='aa' style='clear:both'>\n",
-    Ht::submit("Prepare mail"), " &nbsp; <span class='hint'>You'll be able to review the mails before they are sent.</span>
+    Ht::submit("Prepare mail"), " &nbsp; <span class='hint'>You’ll be able to review the mails before they are sent.</span>
 </div>
 
 

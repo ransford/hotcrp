@@ -29,6 +29,29 @@ function simplify_whitespace($x) {
     return trim(preg_replace('/\s+/', " ", $x));
 }
 
+function prefix_word_wrap($prefix, $text, $indent = 18, $totWidth = 75,
+                          $prefix_right_justify = true) {
+    if (is_int($indent)) {
+        $indentlen = $indent;
+        $indent = str_pad("", $indent);
+    } else
+        $indentlen = strlen($indent);
+
+    $out = "";
+    while ($text != "" && ctype_space($text[0])) {
+        $out .= $text[0];
+        $text = substr($text, 1);
+    }
+
+    $out .= preg_replace("/^(?!\\Z)/m", $indent, wordwrap($text, $totWidth - $indentlen));
+    if (strlen($prefix) <= $indentlen) {
+        $prefix = str_pad($prefix, $indentlen, " ",
+                          ($prefix_right_justify ? STR_PAD_LEFT : STR_PAD_RIGHT));
+        return $prefix . substr($out, $indentlen);
+    } else
+        return $prefix . "\n" . $out;
+}
+
 
 // email and MIME helpers
 
@@ -116,6 +139,8 @@ function array_to_object_recursive($a) {
 // debug helpers
 
 function caller_landmark($position = 1, $skipfunction_re = null) {
+    if (is_string($position))
+        list($position, $skipfunction_re) = array(1, $position);
     $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
     while ($skipfunction_re && isset($trace[$position + 1])) {
         $fname = (string) @$trace[$position + 1]["class"];
@@ -124,5 +149,10 @@ function caller_landmark($position = 1, $skipfunction_re = null) {
             break;
         ++$position;
     }
-    return $trace[$position]["file"] . ":" . $trace[$position]["line"] . ":" . $trace[$position]["function"];
+    if (($pi = @$trace[$position]) && @$pi["file"])
+        return $pi["file"] . ":" . $pi["line"] . ":" . $pi["function"];
+    else if ($pi)
+        return $pi["function"];
+    else
+        return "<unknown>";
 }

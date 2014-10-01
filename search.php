@@ -115,16 +115,16 @@ if ($getaction == "abstract" && SearchActions::any() && defval($_REQUEST, "ajax"
             $text = "===========================================================================\n";
             $n = "Paper #" . $prow->paperId . ": ";
             $l = max(14, (int) ((75.5 - strlen($prow->title) - strlen($n)) / 2) + strlen($n));
-            $text .= wordWrapIndent($prow->title, $n, $l) . "\n";
+            $text .= prefix_word_wrap($n, $prow->title, $l) . "\n";
             $text .= "---------------------------------------------------------------------------\n";
             $l = strlen($text);
-            if ($Me->canViewAuthors($prow, $_REQUEST["t"] == "a")) {
+            if ($Me->can_view_authors($prow, $_REQUEST["t"] == "a")) {
                 cleanAuthor($prow);
-                $text .= wordWrapIndent($prow->authorInformation, "Authors: ", 14) . "\n";
+                $text .= prefix_word_wrap("Authors: ", $prow->authorInformation, 14) . "\n";
             }
             if ($prow->topicIds != "") {
                 $tt = topic_ids_to_text($prow->topicIds, $tmap, $tomap);
-                $text .= wordWrapIndent(substr($tt, 2), "Topics: ", 14) . "\n";
+                $text .= prefix_word_wrap("Topics: ", substr($tt, 2), 14) . "\n";
             }
             if ($l != strlen($text))
                 $text .= "---------------------------------------------------------------------------\n";
@@ -203,7 +203,7 @@ function downloadReviews(&$texts, &$errors) {
         $text = $header;
         if (count($warnings) && $getforms) {
             foreach ($warnings as $w)
-                $text .= wordWrapIndent(whyNotToText($w) . "\n", "==-== ", "==-== ");
+                $text .= prefix_word_wrap("==-== ", whyNotToText($w) . "\n", "==-== ");
             $text .= "\n";
         } else if (count($warnings))
             $text .= join("\n", $warnings) . "\n\n";
@@ -246,7 +246,7 @@ if (($getaction == "revform" || $getaction == "revformz")
                 $t = whyNotText($whyNot, "review");
                 $errors[$t] = false;
                 if (!isset($whyNot["deadline"]))
-                    defappend($texts[$row->paperId], wordWrapIndent(strtoupper(whyNotToText($t)) . "\n\n", "==-== ", "==-== "));
+                    defappend($texts[$row->paperId], prefix_word_wrap("==-== ", strtoupper(whyNotToText($t)) . "\n\n", "==-== "));
             }
             $rf = ReviewForm::get($row);
             defappend($texts[$row->paperId], $rf->textForm($row, $row, $Me, null) . "\n");
@@ -422,7 +422,7 @@ if ($getaction == "authors" && SearchActions::any()
     $result = $Conf->qe($Conf->paperQuery($Me, array("paperId" => SearchActions::selection())));
     $texts = array();
     while (($prow = PaperInfo::fetch($result, $Me))) {
-        if (!$Me->canViewAuthors($prow, true))
+        if (!$Me->can_view_authors($prow, true))
             continue;
         cleanAuthor($prow);
         foreach ($prow->authorTable as $au) {
@@ -648,14 +648,14 @@ function downloadRevpref($extended) {
             $t .= "," . unparse_preference($prow);
         $t .= "," . $prow->title . "\n";
         if ($extended) {
-            if ($Rev->canViewAuthors($prow, false)) {
+            if ($Rev->can_view_authors($prow, false)) {
                 cleanAuthor($prow);
-                $t .= wordWrapIndent($prow->authorInformation, "#  Authors: ", "#           ");
+                $t .= prefix_word_wrap("#  Authors: ", $prow->authorInformation, "#           ");
             }
-            $t .= wordWrapIndent(rtrim($prow->abstract), "# Abstract: ", "#           ") . "\n";
+            $t .= prefix_word_wrap("# Abstract: ", rtrim($prow->abstract), "#           ") . "\n";
             if ($prow->topicIds != "") {
                 $tt = topic_ids_to_text($prow->topicIds, $tmap, $tomap);
-                $t .= wordWrapIndent(substr($tt, 2), "#   Topics: ", "#           ") . "\n";
+                $t .= prefix_word_wrap("#   Topics: ", substr($tt, 2), "#           ") . "\n";
             }
             $t .= "\n";
         }
@@ -852,8 +852,8 @@ if (isset($_REQUEST["setdecision"]) && defval($_REQUEST, "decision", "") != ""
         $Conf->errorMsg("You cannot set paper decisions.");
     else {
         $o = cvtint(@$_REQUEST["decision"]);
-        $outcome_map = $Conf->outcome_map();
-        if (isset($outcome_map[$o])) {
+        $decision_map = $Conf->decision_map();
+        if (isset($decision_map[$o])) {
             $Conf->qe("update Paper set outcome=$o where paperId" . SearchActions::sql_predicate());
             $Conf->updatePaperaccSetting($o > 0);
             redirectSelf(array("atab" => "decide", "decision" => $o));

@@ -110,12 +110,10 @@ function unparseGrace($v) {
 }
 
 function expandMailTemplate($name, $default) {
-    global $nullMailer;
-    if (!isset($nullMailer)) {
-        $nullMailer = new Mailer(null, null);
-        $nullMailer->width = 10000000;
-    }
-    return $nullMailer->expandTemplate($name, $default);
+    global $null_mailer;
+    if (!isset($null_mailer))
+        $null_mailer = new HotCRPMailer(null, null, array("width" => false));
+    return $null_mailer->expand_template($name, $default);
 }
 
 function unparse_setting_error($info, $text) {
@@ -172,9 +170,9 @@ function parseValue($name, $info) {
         $v = simplify_whitespace($v);
         return ($v == "" && !$opt_value ? 0 : array(0, $v));
     } else if ($info->type === "emailheader") {
-        $v = Mailer::mimeEmailHeader("", $v);
+        $v = MimeText::encode_email_header("", $v);
         if ($v !== false)
-            return ($v == "" && !$opt_value ? 0 : array(0, Mailer::mimeHeaderUnquote($v)));
+            return ($v == "" && !$opt_value ? 0 : array(0, MimeText::decode_header($v)));
         else
             $err = unparse_setting_error($info, "Invalid email header.");
     } else if ($info->type === "emailstring") {
@@ -518,19 +516,33 @@ function save_options($set) {
 function save_decisions($set) {
     global $Conf, $Values, $Error, $Highlight;
     if (!$set) {
-        if (defval($_POST, "decn", "") != ""
-            && !defval($_POST, "decn_confirm")) {
+        $dec_revmap = array();
+        foreach ($_POST as $k => &$dname)
+            if (str_starts_with($k, "dec")
+                && ($k === "decn" || ($dnum = cvtint(substr($k, 3), 0)))
+                && ($k !== "decn" || trim($dname) !== "")) {
+                $dname = simplify_whitespace($dname);
+                if (($derror = Conference::decision_name_error($dname))) {
+                    $Error[] = htmlspecialchars($derror);
+                    $Highlight[$k] = true;
+                } else if (isset($dec_revmap[strtolower($dname)])) {
+                    $Error[] = htmlspecialchars("Decision name “{$dname}” was already used.");
+                    $Highlight[$k] = true;
+                } else
+                    $dec_revmap[strtolower($dname)] = true;
+            }
+        unset($dname);
+
+        if (@$_POST["decn"] && !@$_POST["decn_confirm"]) {
             $delta = (defval($_POST, "dtypn", 1) > 0 ? 1 : -1);
             $match_accept = (stripos($_POST["decn"], "accept") !== false);
             $match_reject = (stripos($_POST["decn"], "reject") !== false);
             if ($delta > 0 && $match_reject) {
                 $Error[] = "You are trying to add an Accept-class decision that has “reject” in its name, which is usually a mistake.  To add the decision anyway, check the “Confirm” box and try again.";
                 $Highlight["decn"] = true;
-                return;
             } else if ($delta < 0 && $match_accept) {
                 $Error[] = "You are trying to add a Reject-class decision that has “accept” in its name, which is usually a mistake.  To add the decision anyway, check the “Confirm” box and try again.";
                 $Highlight["decn"] = true;
-                return;
             }
         }
 
@@ -539,31 +551,30 @@ function save_decisions($set) {
     }
 
     // mark all used decisions
-    $dec = $Conf->outcome_map();
+    $decs = $Conf->decision_map();
     $update = false;
     foreach ($_POST as $k => $v)
-        if (str_starts_with($k, "dec")
-            && ($k = cvtint(substr($k, 3), 0)) != 0) {
+        if (str_starts_with($k, "dec") && ($k = cvtint(substr($k, 3), 0))) {
             if ($v == "") {
                 $Conf->qe("update Paper set outcome=0 where outcome=$k");
-                unset($dec[$k]);
+                unset($decs[$k]);
                 $update = true;
-            } else if ($v != $dec[$k]) {
-                $dec[$k] = $v;
+            } else if ($v != $decs[$k]) {
+                $decs[$k] = $v;
                 $update = true;
             }
         }
 
     if (defval($_POST, "decn", "") != "") {
         $delta = (defval($_POST, "dtypn", 1) > 0 ? 1 : -1);
-        for ($k = $delta; isset($dec[$k]); $k += $delta)
+        for ($k = $delta; isset($decs[$k]); $k += $delta)
             /* skip */;
-        $dec[$k] = $_POST["decn"];
+        $decs[$k] = $_POST["decn"];
         $update = true;
     }
 
     if ($update)
-        $Conf->save_setting("outcome_map", 1, $dec);
+        $Conf->save_setting("outcome_map", 1, $decs);
 }
 
 function save_banal($set) {
@@ -1994,7 +2005,7 @@ function doDecGroup() {
 
     echo "<div class='g'></div>\n";
     echo "<table>\n";
-    $decs = $Conf->outcome_map();
+    $decs = $Conf->decision_map();
     krsort($decs);
 
     // count papers per decision
@@ -2036,12 +2047,12 @@ function doDecGroup() {
         "<input type='text' name='decn' value=\"", htmlspecialchars($v), "\" size='35' /> &nbsp; ",
         Ht::select("dtypn", array(1 => "Accept class", -1 => "Reject class"), $vclass),
         "<br /><small>Examples: “Accepted as short paper”, “Early reject”</small>",
-        "</td>";
+        "</td></tr>";
     if (defval($Highlight, "decn"))
-        echo "<td class='lentry nowrap'>",
+        echo "<tr><td></td><td class='lentry nowrap'>",
             Ht::checkbox("decn_confirm", 1, false),
-            "&nbsp;<span class='error'>", Ht::label("Confirm"), "</span></td>";
-    echo "</tr>\n</table>\n";
+            "&nbsp;<span class='error'>", Ht::label("Confirm"), "</span></td></tr>";
+    echo "</table>\n";
 
     // Final versions
     echo "<h3 class=\"settings g\">Final versions</h3>\n";

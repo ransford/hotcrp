@@ -21,6 +21,7 @@ class Conference {
     private $rounds = null;
     private $tracks = null;
     private $_track_tags = null;
+    private $_decisions = null;
     public $dsn = null;
 
     const BLIND_NEVER = 0;
@@ -82,7 +83,7 @@ class Conference {
         }
 
         // update schema
-        if ($this->settings["allowPaperOption"] < 81) {
+        if ($this->settings["allowPaperOption"] < 82) {
             require_once("updateschema.php");
             $oldOK = $OK;
             updateSchema($this);
@@ -188,6 +189,9 @@ class Conference {
                     $this->_track_tags[] = $k;
         } else
             $this->tracks = $this->_track_tags = null;
+
+        // clear decisions cache
+        $this->_decisions = null;
     }
 
     private function crosscheck_options() {
@@ -269,11 +273,35 @@ class Conference {
         return (is_string($x) ? json_decode($x) : $x);
     }
 
-    function outcome_map() {
-        $x = @$this->settingTexts["outcome_map"];
-        if (is_string($x))
-            $x = $this->settingTexts["outcome_map"] = json_decode($x, true);
-        return (is_array($x) ? $x : array());
+    function decision_map() {
+        if ($this->_decisions === null) {
+            $this->_decisions = array();
+            if (@($j = $this->settingTexts["outcome_map"])
+                && @($j = json_decode($j, true))
+                && is_array($j))
+                $this->_decisions = $j;
+            $this->_decisions[0] = "Unspecified";
+        }
+        return $this->_decisions;
+    }
+
+    function decision_name($dnum) {
+        if ($this->_decisions === null)
+            $this->decision_map();
+        if (($dname = @$this->_decisions[$dnum]))
+            return $dname;
+        else
+            return false;
+    }
+
+    static function decision_name_error($dname) {
+        $dname = simplify_whitespace($dname);
+        if ((string) $dname === "")
+            return "Empty decision name.";
+        else if (preg_match(',\A(?:yes|no|any|none|unknown|unspecified)\z,i', $dname))
+            return "Decision name “{$dname}” is reserved.";
+        else
+            return false;
     }
 
     function topic_map() {
@@ -1203,7 +1231,7 @@ class Conference {
         if (is_object($contact))
             $contactId = $contact->contactId;
         else {
-            $contactId = $contact;
+            $contactId = (int) $contact;
             $contact = null;
         }
         if (isset($options["reviewer"]) && is_object($options["reviewer"]))
@@ -1233,6 +1261,7 @@ class Conference {
                 PaperReview.reviewNeedsSubmit,
                 PaperReview.reviewOrdinal,
                 PaperReview.reviewBlind,
+                PaperReview.reviewToken,
                 PaperReview.contactId as reviewContactId,
                 PaperReview.requestedBy,
                 max($myPaperReview.reviewType) as myReviewType,
@@ -1475,11 +1504,11 @@ class Conference {
     function paperRow($sel, $contact, &$whyNot = null) {
         $whyNot = array();
         if (!is_array($sel))
-            $sel = array('paperId' => $sel);
-        if (isset($sel['paperId']))
-            $whyNot['paperId'] = $sel['paperId'];
-        if (isset($sel['reviewId']))
-            $whyNot['reviewId'] = $sel['reviewId'];
+            $sel = array("paperId" => $sel);
+        if (isset($sel["paperId"]))
+            $whyNot["paperId"] = $sel["paperId"];
+        if (isset($sel["reviewId"]))
+            $whyNot["reviewId"] = $sel["reviewId"];
 
         if (isset($sel['paperId']) && cvtint($sel['paperId']) < 0)
             $whyNot['invalidId'] = 'paper';
@@ -1930,10 +1959,9 @@ class Conference {
         $this->header_head($title);
         echo "</head><body", ($id ? " id='$id'" : ""), ($Me ? " onload='hotcrp_load()'" : ""), ">\n";
 
-        $this->scriptStuff .= "<script>"
-            . "hotcrp_base=\"$ConfSiteBase\""
-            . ";hotcrp_postvalue=\"" . post_value() . "\""
-            . ";hotcrp_suffix=\"" . $ConfSiteSuffix . "\"";
+        $this->scriptStuff .= "<script>hotcrp_base=\"$ConfSiteBase\";hotcrp_suffix=\"$ConfSiteSuffix\"";
+        if (session_id() !== "")
+            $this->scriptStuff .= ";hotcrp_postvalue=\"" . post_value() . "\"";
         if (@$CurrentList
             && ($list = SessionList::lookup($CurrentList)))
             $this->scriptStuff .= ";hotcrp_list={num:$CurrentList,id:\"" . addcslashes($list->listid, "\n\r\\\"/") . "\"}";
@@ -2168,14 +2196,6 @@ class Conference {
     //
     // Miscellaneous
     //
-
-    function allowEmailTo($email) {
-        global $Opt;
-        return $Opt["sendEmail"]
-            && ($at = strpos($email, "@")) !== false
-            && substr($email, $at) != "@_.com";
-    }
-
 
     public function capability_manager($for) {
         global $Opt;

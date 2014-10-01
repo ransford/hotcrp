@@ -36,7 +36,7 @@ class PaperTable {
         global $Conf, $Me;
 
         $this->prow = $prow;
-        $this->admin = $Me->allowAdminister($prow);
+        $this->admin = $Me->allow_administer($prow);
 
         if ($this->prow == null) {
             $this->mode = "pe";
@@ -54,10 +54,10 @@ class PaperTable {
         if ($Me->canViewPaper($prow))
             $ms["p"] = true;
         if ($prow->has_author($Me)
-            || $Me->allowAdminister($prow))
+            || $Me->allow_administer($prow))
             $ms["pe"] = true;
         if ($prow->myReviewType >= REVIEW_SECONDARY
-            || $Me->allowAdminister($prow))
+            || $Me->allow_administer($prow))
             $ms["assign"] = true;
         if (isset($_REQUEST["mode"]) && isset($ms[$_REQUEST["mode"]]))
             $this->mode = $_REQUEST["mode"];
@@ -138,8 +138,8 @@ class PaperTable {
         // collect folders
         $folders = array();
         if ($this->prow) {
-            $ever_viewable = $Me->canViewAuthors($this->prow, true);
-            $viewable = $ever_viewable && $Me->canViewAuthors($this->prow, false);
+            $ever_viewable = $Me->can_view_authors($this->prow, true);
+            $viewable = $ever_viewable && $Me->can_view_authors($this->prow, false);
             if ($ever_viewable && !$viewable)
                 $folders[] = $this->foldState & 256 ? "fold8c" : "fold8o";
             if ($ever_viewable && $this->allFolded)
@@ -633,8 +633,8 @@ class PaperTable {
     private function paptabAuthors($skip_contacts) {
         global $Conf, $Me;
 
-        $viewable = $Me->canViewAuthors($this->prow, false);
-        if (!$viewable && !$Me->canViewAuthors($this->prow, true)) {
+        $viewable = $Me->can_view_authors($this->prow, false);
+        if (!$viewable && !$Me->can_view_authors($this->prow, true)) {
             echo "<div class='pg pgtop'>",
                 $this->papt("authorInformation", "Authors"),
                 "<div class='pavb'><i>Hidden for blind review</i></div>",
@@ -732,7 +732,7 @@ class PaperTable {
                 $ox = htmlspecialchars($oa->data);
                 if (@($o->display_space > 1))
                     $ox = nl2br($ox);
-                $ox = link_urls($ox);
+                $ox = Ht::link_urls($ox);
             } else if ($o->type == "attachments") {
                 $ox = array();
                 foreach ($oa->values as $docid)
@@ -1232,7 +1232,7 @@ class PaperTable {
 
     private function _papstripLeadShepherd($type, $name, $showedit, $wholefold) {
         global $Conf, $Me, $Opt, $Error;
-        $editable = ($type == "manager" ? $Me->privChair : $Me->canAdminister($this->prow));
+        $editable = ($type == "manager" ? $Me->privChair : $Me->can_administer($this->prow));
 
         $field = $type . "ContactId";
         if ($this->prow->$field == 0 && !$editable)
@@ -1355,12 +1355,11 @@ class PaperTable {
             Ht::hidden("setdecision", 1);
         if (isset($_REQUEST["forceShow"]))
             echo Ht::hidden("forceShow", $_REQUEST["forceShow"] ? 1 : 0);
-        $outcomes = $Conf->outcome_map();
         echo decisionSelector($this->prow->outcome, null, " onchange='dosubmitstripselector(\"decision\")' id='folddecision_d'"),
             " ", Ht::submit("Save", array("class" => "fx7")),
             " <span id='decisionformresult'></span>",
             "</div></form><p class='fn odname'>",
-            $outcomes[$this->prow->outcome],
+            htmlspecialchars($Conf->decision_name($this->prow->outcome)),
             "</p></div></div>\n";
         $Conf->footerScript("Miniajax.onload(\"decisionform\")");
     }
@@ -1698,11 +1697,11 @@ class PaperTable {
             $this->papstripRank();
         $this->papstripWatch();
         if (($this->admin
-             || ($Me->isPC && $Me->canViewAuthors($prow))
+             || ($Me->isPC && $Me->can_view_authors($prow))
              || $Me->actAuthorView($prow))
             && !$this->editable)
             $this->papstripPCConflicts();
-        if ($Me->canViewAuthors($prow, true) && !$this->editable)
+        if ($Me->can_view_authors($prow, true) && !$this->editable)
             $this->papstripCollaborators();
 
         $foldShepherd = $Me->canSetOutcome($prow) && $prow->outcome <= 0
@@ -1735,7 +1734,7 @@ class PaperTable {
         // what actions are supported?
         $canEdit = $Me->canEditPaper($prow);
         $canReview = $Me->canReview($prow, null);
-        $canAssign = $Me->canAdminister($prow);
+        $canAssign = $Me->can_administer($prow);
         $canHome = ($canEdit || $canAssign || $this->mode == "contact");
 
         echo "<div class='pban'>";
@@ -1892,7 +1891,7 @@ class PaperTable {
             echo "</div></td><td class='papre'><div class='papre'>";
             $this->paptabAuthors(!$this->editable && $this->mode == "pe"
                                  && $prow->timeSubmitted > 0);
-            $this->paptabTopicsOptions($Me->canAdminister($prow));
+            $this->paptabTopicsOptions($Me->can_administer($prow));
             echo "</div></td></tr></table>";
         }
         $this->echoDivExit();
@@ -2028,7 +2027,7 @@ class PaperTable {
         global $Conf, $Me;
         $prow = $this->prow;
         $actPC = $Me->actPC($prow);
-        $actChair = $Me->canAdminister($prow);
+        $actChair = $Me->can_administer($prow);
 
         // review messages
         $viewall = $Me->canViewReview($prow, null, false, $whyNot);
@@ -2290,7 +2289,7 @@ class PaperTable {
         if ($this->mode == "r" && $prow && !count($this->rrows)
             && !count($this->mycrows)
             && $prow->has_author($Me)
-            && !$Me->allowAdminister($prow)
+            && !$Me->allow_administer($prow)
             && ($Conf->timeFinalizePaper($prow) || $prow->timeSubmitted <= 0))
             $this->mode = "pe";
     }

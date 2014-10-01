@@ -94,7 +94,7 @@ function retractRequest($email, $prow, $confirm = true) {
         return $Conf->errorMsg("No such review request.");
     if ($row && $row->reviewModified > 0)
         return $Conf->errorMsg("You can’t retract that review request since the reviewer has already started their review.");
-    if (!$Me->allowAdminister($prow)
+    if (!$Me->allow_administer($prow)
         && (($row && $row->requestedBy && $Me->contactId != $row->requestedBy)
             || ($row2 && $row2->requestedBy && $Me->contactId != $row2->requestedBy)))
         return $Conf->errorMsg("You can’t retract that review request since you didn’t make the request in the first place.");
@@ -110,9 +110,9 @@ function retractRequest($email, $prow, $confirm = true) {
     // send confirmation email, if the review site is open
     if ($Conf->time_review_open() && $row) {
         $Reviewer = Contact::make($row);
-        Mailer::send("@retractrequest", $prow, $Reviewer,
-                     array("requester_contact" => $Me,
-                           "cc" => Text::user_email_to($Me)));
+        HotCRPMailer::send_to($Reviewer, "@retractrequest", $prow,
+                              array("requester_contact" => $Me,
+                                    "cc" => Text::user_email_to($Me)));
     }
 
     // confirmation message
@@ -170,7 +170,7 @@ function pcAssignments() {
     }
 }
 
-if (isset($_REQUEST["update"]) && $Me->allowAdminister($prow) && check_post()) {
+if (isset($_REQUEST["update"]) && $Me->allow_administer($prow) && check_post()) {
     pcAssignments();
     $Conf->qe("unlock tables");
     $Conf->updateRevTokensSetting(false);
@@ -206,11 +206,11 @@ function requestReviewChecks($themHtml, $reqId) {
         $row = edb_row($result);
         if ($row[1] == "<conflict>")
             return $Conf->errorMsg("$themHtml has a conflict registered with paper #$prow->paperId and cannot be asked to review it.");
-        else if ($Me->allowAdminister($prow) && Contact::override_deadlines()) {
+        else if ($Me->allow_administer($prow) && Contact::override_deadlines()) {
             $Conf->infoMsg("Overriding previous refusal to review paper #$prow->paperId." . ($row[1] ? "  (Their reason was “" . htmlspecialchars($row[1]) . "”.)" : ""));
             $Conf->qe("delete from PaperReviewRefused where paperId=$prow->paperId and contactId=$reqId");
         } else
-            return $Conf->errorMsg("$themHtml refused a previous request to review paper #$prow->paperId." . ($row[1] ? " (Their reason was “" . htmlspecialchars($row[1]) . "”.)" : "") . ($Me->allowAdminister($prow) ? " As an administrator, you can override this refusal with the “Override...” checkbox." : ""));
+            return $Conf->errorMsg("$themHtml refused a previous request to review paper #$prow->paperId." . ($row[1] ? " (Their reason was “" . htmlspecialchars($row[1]) . "”.)" : "") . ($Me->allow_administer($prow) ? " As an administrator, you can override this refusal with the “Override...” checkbox." : ""));
     }
 
     return true;
@@ -258,10 +258,10 @@ function requestReview($email) {
     $Conf->qe("update PaperReview set reviewNeedsSubmit=-1 where paperId=$prow->paperId and reviewType=" . REVIEW_SECONDARY . " and contactId=$Requester->contactId and reviewSubmitted is null and reviewNeedsSubmit=1");
 
     // send confirmation email
-    Mailer::send("@requestreview", $prow, $Them,
-                 array("requester_contact" => $Requester,
-                       "other_contact" => $Requester, // backwards compat
-                       "reason" => $reason));
+    HotCRPMailer::send_to($Them, "@requestreview", $prow,
+                          array("requester_contact" => $Requester,
+                                "other_contact" => $Requester, // backwards compat
+                                "reason" => $reason));
 
     // confirmation message
     $Conf->confirmMsg("Created a request to review paper #$prow->paperId.");
@@ -289,12 +289,12 @@ function proposeReview($email) {
         values ($prow->paperId, '" . sqlq($name) . "', '" . sqlq($email) . "', $Me->contactId, '" . sqlq(trim($_REQUEST["reason"])) . "') on duplicate key update paperId=paperId");
 
     // send confirmation email
-    Mailer::send_manager("@proposereview", $prow,
-                         array("permissionContact" => $Me,
-                               "cc" => Text::user_email_to($Me),
-                               "requester_contact" => $Me,
-                               "reviewer_contact" => (object) array("fullName" => $name, "email" => $email),
-                               "reason" => $reason));
+    HotCRPMailer::send_manager("@proposereview", $prow,
+                               array("permissionContact" => $Me,
+                                     "cc" => Text::user_email_to($Me),
+                                     "requester_contact" => $Me,
+                                     "reviewer_contact" => (object) array("fullName" => $name, "email" => $email),
+                                     "reason" => $reason));
 
     // confirmation message
     $Conf->confirmMsg("Proposed that " . htmlspecialchars("$name <$email>") . " review paper #$prow->paperId.  The chair must approve this proposal for it to take effect.");
@@ -358,7 +358,7 @@ if (isset($_REQUEST["add"]) && check_post()) {
     else if (!isset($_REQUEST["email"]) || !isset($_REQUEST["name"]))
         $Conf->errorMsg("An email address is required to request a review.");
     else if (trim($_REQUEST["email"]) == "" && trim($_REQUEST["name"]) == ""
-             && $Me->allowAdminister($prow)) {
+             && $Me->allow_administer($prow)) {
         if (!createAnonymousReview())
             $Conf->qx("unlock tables");
         unset($_REQUEST["reason"]);
@@ -366,7 +366,7 @@ if (isset($_REQUEST["add"]) && check_post()) {
     } else if (trim($_REQUEST["email"]) == "")
         $Conf->errorMsg("An email address is required to request a review.");
     else {
-        if ($Conf->setting("extrev_chairreq") && !$Me->allowAdminister($prow))
+        if ($Conf->setting("extrev_chairreq") && !$Me->allow_administer($prow))
             $ok = proposeReview($_REQUEST["email"]);
         else
             $ok = requestReview($_REQUEST["email"]);
@@ -383,7 +383,7 @@ if (isset($_REQUEST["add"]) && check_post()) {
 
 
 // deny review request
-if (isset($_REQUEST["deny"]) && $Me->allowAdminister($prow) && check_post()
+if (isset($_REQUEST["deny"]) && $Me->allow_administer($prow) && check_post()
     && ($email = trim(defval($_REQUEST, "email", "")))) {
     $Conf->qe("lock tables ReviewRequest write, ContactInfo read, PaperConflict read, PaperReview read, PaperReviewRefused write");
     // Need to be careful and not expose inappropriate information:
@@ -397,8 +397,8 @@ if (isset($_REQUEST["deny"]) && $Me->allowAdminister($prow) && check_post()
             $Conf->qe("insert into PaperReviewRefused (paperId, contactId, requestedBy, reason) values ($prow->paperId, $reqId, $Requester->contactId, 'request denied by chair')");
 
         // send anticonfirmation email
-        Mailer::send("@denyreviewrequest", $prow, $Requester,
-                     array("reviewer_contact" => (object) array("fullName" => trim(defval($_REQUEST, "name", "")), "email" => $email)));
+        HotCRPMailer::send_to($Requester, "@denyreviewrequest", $prow,
+                              array("reviewer_contact" => (object) array("fullName" => trim(defval($_REQUEST, "name", "")), "email" => $email)));
 
         $Conf->confirmMsg("Proposed reviewer denied.");
     } else
@@ -410,7 +410,7 @@ if (isset($_REQUEST["deny"]) && $Me->allowAdminister($prow) && check_post()
 
 
 // add primary or secondary reviewer
-if (isset($_REQUEST["addpc"]) && $Me->allowAdminister($prow) && check_post()) {
+if (isset($_REQUEST["addpc"]) && $Me->allow_administer($prow) && check_post()) {
     if (($pcid = cvtint(@$_REQUEST["pcid"])) <= 0)
         $Conf->errorMsg("Enter a PC member.");
     else if (($pctype = cvtint(@$_REQUEST["pctype"])) == REVIEW_PRIMARY
@@ -447,7 +447,7 @@ $paperTable->paptabBegin();
 // reviewer information
 $proposals = null;
 if ($Conf->setting("extrev_chairreq")) {
-    if ($Me->allowAdminister($prow))
+    if ($Me->allow_administer($prow))
         $q = "";
     else
         $q = " and requestedBy=$Me->contactId";
@@ -461,7 +461,7 @@ if ($t != "")
 
 
 // PC assignments
-if ($Me->canAdminister($prow)) {
+if ($Me->can_administer($prow)) {
     $expertise = $Conf->sversion >= 69 ? "expertise" : "NULL";
     $result = $Conf->qe("select PCMember.contactId,
         PaperConflict.conflictType,
@@ -603,7 +603,7 @@ if ($Conf->setting("extrev_view") >= 2)
     echo "the other reviewers' identities and ";
 echo "any eventual decision.  Before requesting an external review,
  you should generally check personally whether they are interested.";
-if ($Me->allowAdminister($prow))
+if ($Me->allow_administer($prow))
     echo "\nTo create a review with no associated reviewer, leave Name and Email blank.";
 echo '</div></div><div class="revcard_body">';
 echo "<div class='f-i'><div class='f-ix'>
@@ -615,8 +615,8 @@ echo "<div class='f-i'><div class='f-ix'>
 </div><hr class=\"c\" /></div>\n\n";
 
 // reason area
-$null_mailer = new Mailer(null, null);
-$reqbody = $null_mailer->expandTemplate("requestreview", false);
+$null_mailer = new HotCRPMailer;
+$reqbody = $null_mailer->expand_template("requestreview", false);
 if (strpos($reqbody["body"], "%REASON%") !== false) {
     echo "<div class='f-i'>
   <div class='f-c'>Note to reviewer <span class='f-cx'>(optional)</span></div>
@@ -629,7 +629,7 @@ echo "<div class='f-i'>\n",
     "</div>\n\n";
 
 
-if ($Me->canAdminister($prow))
+if ($Me->can_administer($prow))
     echo "<div class='f-i'>\n  ", Ht::checkbox("override"), "&nbsp;", Ht::label("Override deadlines and any previous refusal"), "\n</div>\n";
 
 echo "</div></div></form>\n";

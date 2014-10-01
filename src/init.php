@@ -145,11 +145,13 @@ function __autoload($class_name) {
                                "Formula" => "src/formula.php",
                                "FormulaPaperColumn" => "src/papercolumn.php",
                                "HotCRPDocument" => "src/hotcrpdocument.php",
+                               "HotCRPMailer" => "src/hotcrpmailer.php",
                                "Ht" => "lib/ht.php",
                                "LoginHelper" => "lib/login.php",
-                               "Mailer" => "src/mailer.php",
+                               "Mailer" => "lib/mailer.php",
                                "MeetingTracker" => "src/meetingtracker.php",
                                "Message" => "lib/message.php",
+                               "MimeText" => "lib/mailer.php",
                                "Mimetype" => "lib/mimetype.php",
                                "Multiconference" => "src/multiconference.php",
                                "PaperActions" => "src/paperactions.php",
@@ -257,7 +259,18 @@ if (!@$Opt["loaded"] || @$Opt["missing"])
 
 
 // Allow lots of memory
-ini_set("memory_limit", defval($Opt, "memoryLimit", "128M"));
+function set_memory_limit() {
+    global $Opt;
+    if (!@$Opt["memoryLimit"]) {
+        $suf = array("" => 1, "k" => 1<<10, "m" => 1<<20, "g" => 1<<30);
+        if (preg_match(',\A(\d+)\s*([kmg]?)\z,', strtolower(ini_get("memory_limit")), $m)
+            && $m[1] * $suf[$m[2]] < (128<<20))
+            $Opt["memoryLimit"] = "128M";
+    }
+    if (@$Opt["memoryLimit"])
+        ini_set("memory_limit", $Opt["memoryLimit"]);
+}
+set_memory_limit();
 
 
 // Create the conference

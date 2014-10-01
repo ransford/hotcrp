@@ -151,19 +151,17 @@ function hoturl_defaults($options = array()) {
 function hoturl_site_relative($page, $options = null) {
     global $ConfSiteSuffix, $Opt, $Me, $paperTable, $CurrentList, $_hoturl_defaults;
     $t = $page . $ConfSiteSuffix;
-    // see also redirectSelf
+    // parse options, separate anchor; see also redirectSelf
+    $anchor = "";
     if ($options && is_array($options)) {
         $x = "";
         foreach ($options as $k => $v)
             if ($v !== null && $k !== "anchor")
                 $x .= ($x === "" ? "" : "&amp;") . $k . "=" . urlencode($v);
-        if (isset($options["anchor"]))
-            $x .= "#" . urlencode($options["anchor"]);
+            else if ($v !== null)
+                $anchor = "#" . urlencode($v);
         $options = $x;
-    }
-    // anchor
-    $anchor = "";
-    if (preg_match('/\A(.*?)(#.*)\z/', $options, $m))
+    } else if (preg_match('/\A(.*?)(#.*)\z/', $options, $m))
         list($options, $anchor) = array($m[1], $m[2]);
     // append defaults
     $are = '/\A(|.*?(?:&|&amp;))';
@@ -176,7 +174,7 @@ function hoturl_site_relative($page, $options = null) {
     $is_paper_page = preg_match('/\A(?:paper|review|comment|assign)\z/', $page);
     if (@$paperTable && $paperTable->prow && $is_paper_page
         && preg_match($are . 'p=' . $paperTable->prow->paperId . $zre, $options)
-        && $Me->canAdminister($paperTable->prow)
+        && $Me->can_administer($paperTable->prow)
         && $paperTable->prow->has_conflict($Me)
         && !preg_match($are . 'forceShow=/', $options))
         $options .= "&amp;forceShow=1";
@@ -219,7 +217,7 @@ function hoturl_site_relative($page, $options = null) {
 function hoturl($page, $options = null) {
     global $ConfSiteBase, $ConfSiteSuffix;
     $t = hoturl_site_relative($page, $options);
-    if ($page !== "index")
+    if ($page !== "index" || substr($t, 5 + strlen($ConfSiteSuffix), 1) == "/")
         return $ConfSiteBase . $t;
     else {
         $trail = substr($t, 5 + strlen($ConfSiteSuffix));
@@ -897,32 +895,6 @@ function tabLength($text, $all) {
     return $len;
 }
 
-function wordWrapIndent($text, $info, $indent = 18, $totWidth = 75, $rjinfo = true) {
-    if (is_int($indent)) {
-        $indentlen = $indent;
-        $indent = str_pad("", $indent);
-    } else
-        $indentlen = strlen($indent);
-
-    $out = "";
-    while ($text != "" && ctype_space($text[0])) {
-        $out .= $text[0];
-        $text = substr($text, 1);
-    }
-
-    $out .= preg_replace("/^(?!\\Z)/m", $indent, wordwrap($text, $totWidth - $indentlen));
-    if (strlen($info) <= $indentlen) {
-        $info = str_pad($info, $indentlen, " ", ($rjinfo ? STR_PAD_LEFT : STR_PAD_RIGHT));
-        return $info . substr($out, $indentlen);
-    } else
-        return $info . "\n" . $out;
-}
-
-function link_urls($html) {
-    return preg_replace('@((?:https?|ftp)://(?:[^\s<>"&]|&amp;)*[^\s<>"().,:;&])(["().,:;]*)(?=[\s<>&]|\z)@s',
-                        '<a href="$1" rel="noreferrer">$1</a>$2', $html);
-}
-
 function ini_get_bytes($varname) {
     // from PHP manual
     $val = trim(ini_get($varname));
@@ -1228,16 +1200,14 @@ function unparse_preference_span($preference) {
 function decisionSelector($curOutcome = 0, $id = null, $extra = "") {
     global $Conf;
     $text = "<select" . ($id === null ? "" : " id='$id'") . " name='decision'$extra>\n";
-    $outcomeMap = $Conf->outcome_map();
-    if (!isset($outcomeMap[$curOutcome]))
+    $decs = $Conf->decision_map();
+    if (!isset($decs[$curOutcome]))
         $curOutcome = null;
-    $outcomes = array_keys($outcomeMap);
-    sort($outcomes);
-    $outcomes = array_unique(array_merge(array(0), $outcomes));
+    $outcomes = array_keys($decs);
     if ($curOutcome === null)
         $text .= "    <option value='' selected='selected'><b>Set decision...</b></option>\n";
-    foreach ($outcomes as $key)
-        $text .= "    <option value='$key'" . ($curOutcome == $key && $curOutcome !== null ? " selected='selected'" : "") . ">" . htmlspecialchars($outcomeMap[$key]) . "</option>\n";
+    foreach ($decs as $dnum => $dname)
+        $text .= "    <option value='$dnum'" . ($curOutcome == $dnum && $curOutcome !== null ? " selected='selected'" : "") . ">" . htmlspecialchars($dname) . "</option>\n";
     return $text . "  </select>";
 }
 

@@ -78,10 +78,16 @@ class Contact {
         if (isset($user->contactDbId))
             $this->contactDbId = (int) $user->contactDbId;
         foreach (array("firstName", "lastName", "email", "preferredEmail", "affiliation",
-                       "voicePhoneNumber", "collaborators", "addressLine1", "addressLine2",
+                       "voicePhoneNumber", "addressLine1", "addressLine2",
                        "city", "state", "zipCode", "country") as $k)
             if (isset($user->$k))
                 $this->$k = simplify_whitespace($user->$k);
+        if (isset($user->collaborators)) {
+            $this->collaborators = "";
+            foreach (preg_split('/[\r\n]+/', $user->collaborators) as $c)
+                if (($c = simplify_whitespace($c)) !== "")
+                    $this->collaborators .= "$c\n";
+        }
         self::set_sorter($this);
         if (isset($user->password))
             $this->set_encoded_password($user->password);
@@ -1066,7 +1072,7 @@ class Contact {
             return isset($_REQUEST["override"]) && $_REQUEST["override"] > 0;
     }
 
-    public function allowAdminister($prow) {
+    public function allow_administer($prow) {
         if ($prow) {
             $rights = $this->rights($prow);
             return $rights->allow_administer;
@@ -1084,7 +1090,7 @@ class Contact {
                 || ($acct && $this->contactId > 0 && $this->contactId == $acct->contactId);
     }
 
-    public function canAdminister($prow, $forceShow = null) {
+    public function can_administer($prow, $forceShow = null) {
         if ($prow) {
             $rights = $this->rights($prow, $forceShow);
             return $rights->can_administer;
@@ -1354,11 +1360,11 @@ class Contact {
             || $this->canViewDecision($prow, $forceShow);
     }
 
-    function allowViewAuthors($prow, &$whyNot = null) {
-        return $this->canViewAuthors($prow, true, $whyNot);
+    function allow_view_authors($prow, &$whyNot = null) {
+        return $this->can_view_authors($prow, true, $whyNot);
     }
 
-    function canViewAuthors($prow, $forceShow = null, &$whyNot = null) {
+    function can_view_authors($prow, $forceShow = null, &$whyNot = null) {
         global $Conf;
         // fetch paper
         if (!($prow = $this->_fetchPaperRow($prow, $whyNot)))
@@ -1413,7 +1419,7 @@ class Contact {
                     || !$oview
                     || $oview == "rev"
                     || ($oview == "nonblind"
-                        && $this->canViewAuthors($prow, $forceShow)))))
+                        && $this->can_view_authors($prow, $forceShow)))))
             return true;
         $whyNot["permission"] = 1;
         return false;
@@ -1901,7 +1907,7 @@ class Contact {
         if ($crow && !isset($crow->commentType))
             setCommentType($crow);
         if ($crow->commentType & COMMENTTYPE_RESPONSE)
-            return $this->canViewAuthors($prow, $forceShow);
+            return $this->can_view_authors($prow, $forceShow);
         $crow_contactId = 0;
         if ($crow && isset($crow->commentContactId))
             $crow_contactId = $crow->commentContactId;
@@ -1992,7 +1998,7 @@ class Contact {
     }
 
     function canSetOutcome($prow) {
-        return $this->canAdminister($prow);
+        return $this->can_administer($prow);
     }
 
 
@@ -2145,11 +2151,12 @@ class Contact {
         if ($row->timeWithdrawn > 0)
             return array("pstat_with", "Withdrawn");
         else if (@$row->outcome && $this->canViewDecision($row, $forceShow)) {
-            if (!($data = @self::$status_info_cache[$row->outcome])) {
+            $data = @self::$status_info_cache[$row->outcome];
+            if (!$data) {
                 $decclass = ($row->outcome > 0 ? "pstat_decyes" : "pstat_decno");
 
-                $outcomes = $Conf->outcome_map();
-                $decname = @$outcomes[$row->outcome];
+                $decs = $Conf->decision_map();
+                $decname = @$decs[$row->outcome];
                 if ($decname) {
                     $trdecname = preg_replace('/[^-.\w]/', '', $decname);
                     if ($trdecname != "")
@@ -2324,10 +2331,11 @@ class Contact {
             $template = "@resetpassword";
         }
 
-        $prep = Mailer::prepareToSend($template, null, $this, $rest);
-        if ($prep["allowEmail"] || !$sensitive
+        $mailer = new HotCRPMailer($this, null, $rest);
+        $prep = $mailer->make_preparation($template, $rest);
+        if ($prep->sendable || !$sensitive
             || @$Opt["debugShowSensitiveEmail"]) {
-            Mailer::sendPrepared($prep);
+            Mailer::send_preparation($prep);
             return $template;
         } else {
             $Conf->errorMsg("Mail cannot be sent to " . htmlspecialchars($this->email) . " at this time.");
