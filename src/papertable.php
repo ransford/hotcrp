@@ -298,7 +298,7 @@ class PaperTable {
         $out = array();
 
         // status and download
-        if ($Me->canDownloadPaper($prow)) {
+        if ($Me->can_view_pdf($prow)) {
             $status_info = $Me->paper_status_info($prow);
             $t = "<td class=\"nowrap pad\">"
                 . "<span class=\"pstat $status_info[0]\">" . htmlspecialchars($status_info[1]) . "</span></td>";
@@ -318,15 +318,17 @@ class PaperTable {
 
             foreach (PaperOption::option_list() as $id => $o)
                 if (@$o->near_submission
-                    && $o->is_document()
+                    && $o->has_document()
                     && $prow
-                    && ($oa = $prow->option($id))
-                    && $oa->value > 1
-                    && ($d = paperDocumentData($prow, $id, $oa->value))) {
-                    $pdfs[] = "<span class='papfn'>"
-                        . htmlspecialchars($o->name)
-                        . "</span>: &nbsp;"
-                        . documentDownload($d, count($pdfs) ? "dlimgsp" : "dlimg");
+                    && $Me->can_view_paper_option($prow, $o)
+                    && ($oa = $prow->option($id))) {
+                    foreach ($oa->values as $docid)
+                        if ($docid > 1 && ($d = paperDocumentData($prow, $id, $docid))) {
+                            $name = '<span class="papfn">' . htmlspecialchars($o->name) . '</span>';
+                            if ($o->type == "attachments")
+                                $name .= "/" . htmlspecialchars($d->filename);
+                            $pdfs[] = documentDownload($d, count($pdfs) ? "dlimgsp" : "dlimg", $name);
+                        }
                 }
 
             if ($prow->finalPaperStorageId > 1
@@ -390,7 +392,7 @@ class PaperTable {
         // current version, if any
         $doc = null;
         $inputid = ($optionType ? "opt" . $documentType : "paperUpload");
-        if ($prow && $Me->canDownloadPaper($prow) && $storageId > 1
+        if ($prow && $Me->can_view_pdf($prow) && $storageId > 1
             && (($doc = paperDocumentData($prow, $documentType, $storageId)))) {
             echo "<table id='current_$inputid'><tr>",
                 "<td class='nowrap'>", documentDownload($doc), "</td>";
@@ -712,7 +714,7 @@ class PaperTable {
         foreach ($this->prow->options() as $oa) {
             $o = $oa->option;
             if ((@$o->near_submission && $o->is_document())
-                || (!$showAllOptions && !$Me->canViewPaperOption($this->prow, $o)))
+                || (!$showAllOptions && !$Me->can_view_paper_option($this->prow, $o)))
                 continue;
 
             // create option display value
@@ -741,7 +743,7 @@ class PaperTable {
                         $ox[] = documentDownload($doc, "sdlimg", htmlspecialchars($doc->filename));
                     }
                 $ox = join("<br />\n", $ox);
-            } else if ($o->is_document() && $oa->value) {
+            } else if ($o->is_document() && $oa->value > 1) {
                 $show_on = false;
                 if ($o->type == "pdf")
                     /* make fake document */
@@ -755,10 +757,10 @@ class PaperTable {
                 continue;
 
             // display it
-            $folded = $showAllOptions && !$Me->canViewPaperOption($this->prow, $o, false);
+            $folded = $showAllOptions && !$Me->can_view_paper_option($this->prow, $o, false);
             if (@$o->highlight || @$o->near_submission) {
                 $x = '<div class="pgsm' . ($folded ? " fx8" : "") . '">'
-                    . '<div class="papt"><span class="papfn">'
+                    . '<div class="pavt"><span class="papfn">'
                     . ($show_on ? $on : $ox) . "</span>"
                     . '<hr class="c" /></div>';
                 if ($show_on && $ox !== true)
@@ -776,7 +778,7 @@ class PaperTable {
                     ++$nfolded;
                 }
                 $optionhtml[] = $x . "\n";
-                if ($o->is_document() || $o->type == "attachments")
+                if ($o->has_document())
                     ++$ndocuments;
             }
         }
@@ -1060,7 +1062,7 @@ class PaperTable {
         foreach ($opt as $o) {
             if (!@($display_types[$o->display_type()])
                 || (@$o->final && !$this->canUploadFinal)
-                || ($prow && !$Me->canViewPaperOption($prow, $o, true)))
+                || ($prow && !$Me->can_view_paper_option($prow, $o, true)))
                 continue;
 
             $optid = "opt$o->id";

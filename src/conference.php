@@ -180,18 +180,25 @@ class Conference {
             unset($Opt["dbNoPapers"]);
 
         // tracks settings
-        if (@($j = $this->settingTexts["tracks"])
-            && @($j = json_decode($j))) {
-            $this->tracks = $j;
-            $this->_track_tags = array();
-            foreach ($this->tracks as $k => $v)
-                if ($k !== "_")
-                    $this->_track_tags[] = $k;
-        } else
-            $this->tracks = $this->_track_tags = null;
+        $this->tracks = $this->_track_tags = null;
+        if (@($j = $this->settingTexts["tracks"]))
+            $this->crosscheck_track_settings($j);
 
         // clear decisions cache
         $this->_decisions = null;
+    }
+
+    private function crosscheck_track_settings($j) {
+        if (is_string($j) && !($j = json_decode($j)))
+            return;
+        $this->tracks = $j;
+        $this->_track_tags = array();
+        foreach ($this->tracks as $k => $v) {
+            if ($k !== "_")
+                $this->_track_tags[] = $k;
+            if (!isset($v->viewpdf) && isset($v->view))
+                $v->viewpdf = $v->view;
+        }
     }
 
     private function crosscheck_options() {
@@ -948,13 +955,13 @@ class Conference {
     function timeReviewerViewAcceptedAuthors() {
         return $this->setting("seedec") == self::SEEDEC_ALL;
     }
-    function timePCViewPaper($prow, $download) {
+    function timePCViewPaper($prow, $pdf) {
         if ($prow->timeWithdrawn > 0)
             return false;
         else if ($prow->timeSubmitted > 0)
             return true;
         else
-            return !$download && $this->can_pc_see_all_submissions();
+            return !$pdf && $this->can_pc_see_all_submissions();
     }
     function timeReviewerViewSubmittedPaper() {
         return true;
@@ -1035,7 +1042,7 @@ class Conference {
             "select paperStorageId from PaperComment where paperStorageId>1");
         $document_option_ids = array();
         foreach (PaperOption::option_list() as $id => $o)
-            if ($o->value_is_document())
+            if ($o->has_document())
                 $document_option_ids[] = $id;
         if (count($document_option_ids))
             $q[] = "select value from PaperOption where optionId in ("

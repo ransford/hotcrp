@@ -14,8 +14,7 @@ if (!isset($_REQUEST["group"])
 
 $Highlight = $Conf->session("settings_highlight", array());
 $Conf->save_session("settings_highlight", null);
-$Error = array();
-$Values = array();
+$Error = $Warning = $Values = array();
 $DateExplanation = "Date examples: “now”, “10 Dec 2006 11:59:59pm PST” <a href='http://www.gnu.org/software/tar/manual/html_section/Date-input-formats.html'>(more examples)</a>";
 $TagStyles = "red|orange|yellow|green|blue|purple|gray|bold|italic|big|small|dim";
 
@@ -216,7 +215,7 @@ function save_tags($set, $what) {
             if ($t !== "" && $tagger->check($t, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE))
                 $vs[$t] = true;
             else if ($t !== "") {
-                $Error[] = "Chair-only tag “" . htmlspecialchars($t) . "” contains odd characters.";
+                $Error[] = "Chair-only tag: " . $tagger->error_html;
                 $Highlight["tag_chair"] = true;
             }
         $v = array(count($vs), join(" ", array_keys($vs)));
@@ -234,7 +233,7 @@ function save_tags($set, $what) {
                     $t = $m[1] . "#1";
                 $vs[] = $t;
             } else if ($t !== "") {
-                $Error[] = "Voting tag “" . htmlspecialchars($t) . "” contains odd characters.";
+                $Error[] = "Voting tag: " . $tagger->error_html;
                 $Highlight["tag_vote"] = true;
             }
         $v = array(count($vs), join(" ", $vs));
@@ -260,7 +259,7 @@ function save_tags($set, $what) {
             while (($row = edb_row($result))) {
                 $who = substr($row[1], 0, strpos($row[1], "~"));
                 if ($row[2] < 0) {
-                    $Error[] = "Removed " . Text::user_html($pcm[$who]) . "'s negative &ldquo;$base&rdquo; vote for paper #$row[0].";
+                    $Error[] = "Removed " . Text::user_html($pcm[$who]) . "’s negative “{$base}” vote for paper #$row[0].";
                     $negative = true;
                 } else {
                     $pvals[$row[0]] = defval($pvals, $row[0], 0) + $row[2];
@@ -291,7 +290,7 @@ function save_tags($set, $what) {
             if ($t !== "" && $tagger->check($t, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE))
                 $vs[] = $t;
             else if ($t !== "") {
-                $Error[] = "Rank tag “" . htmlspecialchars($t) . "” contains odd characters.";
+                $Error[] = "Rank tag: " . $tagger->error_html;
                 $Highlight["tag_rank"] = true;
             }
         if (count($vs) > 1) {
@@ -315,7 +314,7 @@ function save_tags($set, $what) {
                     if ($t !== "" && $tagger->check($t, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE))
                         $vs[] = $t . "=" . $k;
                     else if ($t !== "") {
-                        $Error[] = ucfirst($k) . " color tag “" . htmlspecialchars($t) . "” contains odd characters.";
+                        $Error[] = ucfirst($k) . " color tag: " . $tagger->error_html;
                         $Highlight["tag_color_" . $k] = true;
                     }
             }
@@ -578,7 +577,7 @@ function save_decisions($set) {
 }
 
 function save_banal($set) {
-    global $Conf, $Values, $Highlight, $Error, $ConfSitePATH;
+    global $Conf, $Values, $Highlight, $Error, $Warning, $ConfSitePATH;
     if ($set)
         return true;
     if (!isset($_POST["sub_banal"])) {
@@ -721,12 +720,12 @@ function save_banal($set) {
             | CheckFormat::ERR_TEXTBLOCK | CheckFormat::ERR_BODYFONTSIZE
             | CheckFormat::ERR_BODYLEADING;
         if ($s1 != 2 || $e1 != 0 || $s2 != 1 || ($e2 & $want_e2) != $want_e2)
-            $Conf->warnMsg("Running the automated paper checker on a sample PDF file produced unexpected results.  Check that your <code>pdftohtml</code> package is up to date.  You may want to disable the automated checker for now. (Internal error information: $s1 $e1 $s2 $e2)");
+            $Warning[] = "Running the automated paper checker on a sample PDF file produced unexpected results.  Check that your <code>pdftohtml</code> package is up to date.  You may want to disable the automated checker for now. (Internal error information: $s1 $e1 $s2 $e2)";
     }
 }
 
 function save_tracks($set) {
-    global $Values, $Error, $Highlight;
+    global $Values, $Error, $Warning, $Highlight;
     if ($set)
         return true;
     $tagger = new Tagger;
@@ -738,27 +737,34 @@ function save_tracks($set) {
             continue;
         else if (!$tagger->check($trackname, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE)
                  || ($trackname === "_" && $i != 1)) {
-            $Error[] = "Track name “" . htmlspecialchars($trackname) . "” contains odd characters.";
+            if ($trackname !== "_")
+                $Error[] = "Track name: " . $tagger->error_html;
+            else
+                $Error[] = "Track name “_” is reserved.";
             $Highlight["name_track$i"] = $Highlight["tracks"] = true;
             continue;
         }
         $t = (object) array();
-        foreach (array("view", "viewrev", "assrev", "unassrev") as $type)
+        foreach (array("view", "viewpdf", "viewrev", "assrev", "unassrev") as $type)
             if (($ttype = defval($_POST, "${type}_track$i", "")) == "+"
                 || $ttype == "-") {
                 $ttag = trim(defval($_POST, "${type}tag_track$i", ""));
                 if ($ttag === "" || $ttag === "(tag)") {
                     $Error[] = "Tag missing for track setting.";
                     $Highlight["${type}_track$i"] = $Highlight["tracks"] = true;
-                } else if ($tagger->check($ttag, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE))
+                } else if (($ttype == "+" && strcasecmp($ttag, "none") == 0)
+                           || $tagger->check($ttag, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE))
                     $t->$type = $ttype . $ttag;
                 else {
-                    $Error[] = "Tag “" . htmlspecialchars($ttag) . "” contains odd characters.";
+                    $Error[] = $tagger->error_html;
                     $Highlight["${type}_track$i"] = $Highlight["tracks"] = true;
                 }
-            }
+            } else if ($ttype == "none")
+                $t->$type = "+none";
         if (count((array) $t) || @$tracks->_)
             $tracks->$trackname = $t;
+        if (@$t->viewpdf && $t->viewpdf != @$t->unassrev && @$t->unassrev != "+none")
+            $Warning[] = ($trackname === "_" ? "Default track" : "Track “{$trackname}”") . ": Generally, a track that restricts PDF visibility should restrict the “self-assign papers” right in the same way.";
     }
     if (count((array) $tracks))
         $Values["tracks"] = array(1, json_encode($tracks));
@@ -1009,11 +1015,11 @@ if (isset($_REQUEST["update"]) && check_post()) {
     if (value("resp_open") > 0
         && value("au_seerev", -1) <= 0
         && value("resp_done", $Now + 1) > $Now)
-        $Conf->warnMsg("Authors are allowed to respond to the reviews, but authors can’t see the reviews.  This seems odd.");
+        $Warning[] = "Authors are allowed to respond to the reviews, but authors can’t see the reviews.  This seems odd.";
     if (value("sub_freeze", -1) == 0
         && value("sub_open") > 0
         && value("sub_sub") <= 0)
-        $Conf->warnMsg("You have not set a paper submission deadline, but authors can update their submissions until the deadline.  This seems odd.  You probably should (1) specify a paper submission deadline; (2) select “Authors must freeze the final version of each submission”; or (3) manually turn off “Open site for submissions” when submissions complete.");
+        $Warning[] = "You have not set a paper submission deadline, but authors can update their submissions until the deadline.  This seems odd.  You probably should (1) specify a paper submission deadline; (2) select “Authors must freeze the final version of each submission”; or (3) manually turn off “Open site for submissions” when submissions complete.";
     if (value("sub_open", 1) <= 0
         && $Conf->setting("sub_open") > 0
         && value_or_setting("sub_sub") <= 0)
@@ -1023,7 +1029,7 @@ if (isset($_REQUEST["update"]) && check_post()) {
         if (value($deadline) > $Now
             && value($deadline) != $Conf->setting($deadline)
             && value_or_setting("rev_open") <= 0) {
-            $Conf->warnMsg("Review deadline set. You may also want to open the site for reviewing.");
+            $Warning[] = "Review deadline set. You may also want to open the site for reviewing.";
             $Highlight["rev_open"] = true;
             break;
         }
@@ -1031,14 +1037,14 @@ if (isset($_REQUEST["update"]) && check_post()) {
         && $Conf->setting("pcrev_soft") > 0
         && $Now < $Conf->setting("pcrev_soft")
         && count($Error) == 0)
-        $Conf->warnMsg("Authors can now see reviews and comments although it is before the review deadline.  This is sometimes unintentional.");
+        $Warning[] = "Authors can now see reviews and comments although it is before the review deadline.  This is sometimes unintentional.";
     if (value("final_open")
         && (!value("final_done") || value("final_done") > $Now)
         && value_or_setting("seedec") != Conference::SEEDEC_ALL)
-        $Conf->warnMsg("The system is set to collect final versions, but authors cannot submit final versions until they know their papers have been accepted.  You should change the “Who can see paper decisions” setting to “<strong>Authors</strong>, etc.”");
+        $Warning[] = "The system is set to collect final versions, but authors cannot submit final versions until they know their papers have been accepted.  You should change the “Who can see paper decisions” setting to “<strong>Authors</strong>, etc.”";
     if (value("seedec") == Conference::SEEDEC_ALL
         && value_or_setting("au_seerev") == AU_SEEREV_NO)
-        $Conf->warnMsg("Authors can see decisions, but not reviews. This is sometimes unintentional.");
+        $Warning[] = "Authors can see decisions, but not reviews. This is sometimes unintentional.";
     if (has_value("msg.clickthrough_submit"))
         $Values["clickthrough_submit"] = null;
 
@@ -1098,19 +1104,28 @@ if (isset($_REQUEST["update"]) && check_post()) {
     }
 
     // report errors
-    if (count($Error) > 0) {
-        $filter_error = array();
-        foreach ($Error as $e)
-            if ($e !== true && $e !== 1)
-                $filter_error[] = $e;
-        if (count($filter_error))
-            $Conf->errorMsg(join("<br />\n", $filter_error));
+    $msgs = array();
+    if (count($Error) > 0 || count($Warning) > 0) {
+        $any_errors = false;
+        foreach ($Error as $m)
+            if ($m && $m !== true && $m !== 1)
+                $msgs[] = $any_errors = $m;
+        foreach ($Warning as $m)
+            if ($m && $m !== true && $m !== 1)
+                $msgs[] = "Warning: " . $m;
+        $mt = '<div class="multimessage"><div>' . join('</div><div>', $msgs) . '</div></div>';
+        if (count($msgs) && $any_errors)
+            $Conf->errorMsg($mt);
+        else if (count($msgs))
+            $Conf->warnMsg($mt);
     }
 
     // update the review form in case it's changed
     ReviewForm::clear_cache();
     if (count($Error) == 0) {
         $Conf->save_session("settings_highlight", $Highlight);
+        if (!count($msgs))
+            $Conf->confirmMsg("Changes saved.");
         redirectSelf();
     }
 } else if ($Group == "rfo")
@@ -1843,22 +1858,26 @@ function doRfoGroup() {
 // Tags and tracks
 function do_track_permission($type, $question, $tnum, $thistrack) {
     global $Conf, $Error;
+    $tclass = $ttag = "";
     if (count($Error) > 0) {
         $tclass = defval($_POST, "${type}_track$tnum", "");
         $ttag = defval($_POST, "${type}tag_track$tnum", "");
     } else if ($thistrack && @$thistrack->$type) {
-        $tclass = substr($thistrack->$type, 0, 1);
-        $ttag = substr($thistrack->$type, 1);
-    } else
-        $tclass = $ttag = "";
+        if ($thistrack->$type == "+none")
+            $tclass = "none";
+        else {
+            $tclass = substr($thistrack->$type, 0, 1);
+            $ttag = substr($thistrack->$type, 1);
+        }
+    }
 
-    echo "<tr hotcrp_fold=\"1\" class=\"fold", ($tclass == "" ? "c" : "o"), "\">",
+    echo "<tr hotcrp_fold=\"1\" class=\"fold", ($tclass == "" || $tclass == "none" ? "c" : "o"), "\">",
         "<td class=\"lxcaption\">",
         setting_label("${type}_track$tnum", $question, "${type}_track$tnum"),
         "</td>",
         "<td>",
-        Ht::select("${type}_track$tnum", array("" => "Whole PC", "+" => "PC members with tag", "-" => "PC members without tag"), $tclass,
-                   array("onchange" => "void foldup(this,event,{f:this.selectedIndex==0})")),
+        Ht::select("${type}_track$tnum", array("" => "Whole PC", "+" => "PC members with tag", "-" => "PC members without tag", "none" => "Administrators only"), $tclass,
+                   array("onchange" => "void foldup(this,event,{f:this.selectedIndex==0||this.selectedIndex==3})")),
         " &nbsp;",
         Ht::entry("${type}tag_track$tnum", $ttag,
                   array("class" => "fx",
@@ -1883,9 +1902,10 @@ function do_track($trackname, $tnum) {
     $t = $t && $trackname !== "" ? @$t->$trackname : null;
     echo "<table style=\"margin-left:1.5em;margin-bottom:0.5em\">";
     do_track_permission("view", "Who can view these papers?", $tnum, $t);
+    do_track_permission("viewpdf", "Who can view PDFs?<br><span class=\"hint\">Assigned reviewers can always view PDFs.</span>", $tnum, $t);
     do_track_permission("viewrev", "Who can view reviews?", $tnum, $t);
     do_track_permission("assrev", "Who can be assigned a review?", $tnum, $t);
-    do_track_permission("unassrev", "Who can review without an assignment?", $tnum, $t);
+    do_track_permission("unassrev", "Who can self-assign a review?", $tnum, $t);
     echo "</table></div>\n\n";
 }
 
@@ -2094,10 +2114,6 @@ foreach (array("info" => "Conference information",
     echo "</td></tr>";
 }
 echo "</table></td><td class='top'><div class='lht'>";
-
-// Good to warn multiple times about GD
-if (!function_exists("imagecreate"))
-    $Conf->warnMsg("Your PHP installation appears to lack GD support, which is required for drawing graphs.  You may want to fix this problem and restart Apache.", true);
 
 echo "<div class='aahc'>";
 doActionArea(true);
