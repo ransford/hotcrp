@@ -142,11 +142,12 @@ class UserStatus {
         // Regularize names
         $name = Text::analyze_name($cj);
         foreach (array("firstName", "lastName", "email") as $k)
-            if (isset($name->$k))
+            if ($name->$k !== "" && $name->$k !== false)
                 $cj->$k = $name->$k;
 
         // Canonicalize keys
         foreach (array("preferredEmail" => "preferred_email",
+                       "institution" => "affiliation",
                        "voicePhoneNumber" => "phone",
                        "addressLine1" => "address",
                        "zipCode" => "zip", "postal_code" => "zip") as $x => $y)
@@ -304,6 +305,7 @@ class UserStatus {
 
     function save($cj, $old_user = null, $actor = null) {
         global $Conf, $Now;
+        assert(is_object($cj));
 
         if (is_int(@$cj->id) && $cj->id && !$old_user)
             $old_user = Contact::find_by_id($cj->id);

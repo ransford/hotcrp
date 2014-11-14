@@ -15,20 +15,34 @@ if (!isset($_REQUEST["group"])
 $Highlight = $Conf->session("settings_highlight", array());
 $Conf->save_session("settings_highlight", null);
 $Error = $Warning = $Values = array();
-$DateExplanation = "Date examples: “now”, “10 Dec 2006 11:59:59pm PST” <a href='http://www.gnu.org/software/tar/manual/html_section/Date-input-formats.html'>(more examples)</a>";
+$DateExplanation = "Date examples: “now”, “10 Dec 2006 11:59:59pm PST”, “2014-10-31 00:00 UTC-1100” <a href='http://php.net/manual/en/datetime.formats.php'>(more examples)</a>";
 $TagStyles = "red|orange|yellow|green|blue|purple|gray|bold|italic|big|small|dim";
 
 // read setting information
 $SettingInfo = json_decode(file_get_contents("$ConfSitePATH/src/settinginfo.json"), true);
-if (@$Opt["settinginfo_include"])
-    foreach (expand_includes($ConfSitePATH, $Opt["settinginfo_include"]) as $f)
-        if (($x = file_get_contents($f))) {
-            $x = json_decode($x, true);
-            if (is_array($x))
-                $SettingInfo = array_replace_recursive($SettingInfo, $x);
-            else if (json_last_error() !== JSON_ERROR_NONE)
-                trigger_error("settinginfo_include($f) parse error: " . json_last_error_msg());
-        }
+
+function handle_settinginfo($text, $f) {
+    global $SettingInfo;
+    $j = json_decode($text, true);
+    if (is_array($j))
+        $SettingInfo = array_replace_recursive($SettingInfo, $j);
+    else if (json_last_error() !== JSON_ERROR_NONE)
+        trigger_error("settinginfo_include($f) parse error: " . json_last_error_msg());
+}
+
+if (($settinginfo_include = @$Opt["settinginfo_include"])) {
+    if (!is_array($settinginfo_include))
+        $settinginfo_include = array($settinginfo_include);
+    foreach ($settinginfo_include as $k => $si) {
+        if (preg_match(',\A\s*\{\s*\",s', $si))
+            handle_settinginfo($si, $k);
+        else
+            foreach (expand_includes($ConfSitePATH, $si) as $f)
+                if (($x = file_get_contents($f)))
+                    handle_settinginfo($x, $f);
+    }
+}
+
 $SettingInfo = array_to_object_recursive($SettingInfo);
 
 // maybe set $Opt["contactName"] and $Opt["contactEmail"]
@@ -1015,11 +1029,11 @@ if (isset($_REQUEST["update"]) && check_post()) {
     if (value("resp_open") > 0
         && value("au_seerev", -1) <= 0
         && value("resp_done", $Now + 1) > $Now)
-        $Warning[] = "Authors are allowed to respond to the reviews, but authors can’t see the reviews.  This seems odd.";
+        $Warning[] = "The site will collect responses once you allow authors to see the reviews.";
     if (value("sub_freeze", -1) == 0
         && value("sub_open") > 0
         && value("sub_sub") <= 0)
-        $Warning[] = "You have not set a paper submission deadline, but authors can update their submissions until the deadline.  This seems odd.  You probably should (1) specify a paper submission deadline; (2) select “Authors must freeze the final version of each submission”; or (3) manually turn off “Open site for submissions” when submissions complete.";
+        $Warning[] = "You have not set a paper submission deadline, but authors can update their submissions until the deadline.  This is sometimes unintentional.  You probably should (1) specify a paper submission deadline; (2) select “Authors must freeze the final version of each submission”; or (3) manually turn off “Open site for submissions” when submissions complete.";
     if (value("sub_open", 1) <= 0
         && $Conf->setting("sub_open") > 0
         && value_or_setting("sub_sub") <= 0)
@@ -1212,7 +1226,7 @@ function doRadio($name, $varr) {
         $x = 0;
     echo "<table>\n";
     foreach ($varr as $k => $text) {
-        echo "<tr><td class='nowrap'>", Ht::radio($name, $k, $k == $x, setting_js($name)),
+        echo "<tr><td class='nowrap'>", Ht::radio($name, $k, $k == $x, setting_js($name, array("id" => "{$name}_{$k}"))),
             "&nbsp;</td><td>";
         if (is_array($text))
             echo setting_label($name, $text[0], true), "<br /><small>", $text[1], "</small>";
@@ -1311,7 +1325,7 @@ function doAccGroup() {
 
     echo "<h3 class=\"settings g\">Program committee &amp; system administrators</h3>";
 
-    echo "<p><a href='", hoturl("profile", "u=new"), "' class='button'>Create account</a> &nbsp;|&nbsp; ",
+    echo "<p><a href='", hoturl("profile", "u=new&amp;role=pc"), "' class='button'>Create PC account</a> &nbsp;|&nbsp; ",
         "Select a user’s name to edit a profile.</p>\n";
     $pl = new ContactList($Me, false);
     echo $pl->text("pcadminx", hoturl("users", "t=pcadmin"));

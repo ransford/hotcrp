@@ -805,6 +805,7 @@ class Conference {
         }
         if (@$Opt["dateFormatTimezoneRemover"])
             $d = preg_replace($Opt["dateFormatTimezoneRemover"], " ", $d);
+        $d = preg_replace('/\butc([-+])/i', 'GMT$1', $d);
         return strtotime($d, $reference);
     }
 
@@ -900,7 +901,8 @@ class Conference {
         return $s == AU_SEEREV_ALWAYS || ($s > 0 && !$reviewsOutstanding);
     }
     function timeAuthorRespond() {
-        return $this->deadlinesBetween("resp_open", "resp_done", "resp_grace");
+        return $this->deadlinesBetween("resp_open", "resp_done", "resp_grace")
+            && $this->timeAuthorViewReviews();
     }
     function timeAuthorViewDecision() {
         return $this->setting("seedec") == self::SEEDEC_ALL;
@@ -1594,11 +1596,10 @@ class Conference {
                 return null;
             }
         }
-        $contactTags = "ContactInfo.contactTags";
 
         $q = "select PaperReview.*,
                 ContactInfo.firstName, ContactInfo.lastName, ContactInfo.email, ContactInfo.roles as contactRoles,
-                $contactTags,
+                ContactInfo.contactTags,
                 ReqCI.firstName as reqFirstName, ReqCI.lastName as reqLastName, ReqCI.email as reqEmail";
         if (isset($selector["ratings"]))
             $q .= ",
