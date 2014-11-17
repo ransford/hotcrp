@@ -940,6 +940,10 @@ class Contact {
             $Conf->log("Created account ($Me->email)", $this);
         else
             $Conf->log("Created account", $this);
+
+        // ransford hack: put on PC, tag with #community
+        $this->save_roles(Contact::ROLE_PC, ($Me ? $Me : ''));
+        $Conf->qe("update ContactInfo set contactTags='community' where contactId=$this->contactId");
     }
 
     function load_address() {
