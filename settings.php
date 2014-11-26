@@ -1844,12 +1844,14 @@ function doRevGroup() {
     doRadio("pc_seeallrev", array(Conference::PCSEEREV_YES => "Yes",
                                   Conference::PCSEEREV_UNLESSINCOMPLETE => "Yes, unless they haven’t completed an assigned review for the same paper",
                                   Conference::PCSEEREV_UNLESSANYINCOMPLETE => "Yes, after completing all their assigned reviews",
-                                  Conference::PCSEEREV_IFCOMPLETE => "Only after completing a review for the same paper"));
+                                  Conference::PCSEEREV_IFCOMPLETE => "Only after completing a review for the same paper",
+                                  Conference::PCSEEREV_NO => "No, cannot see any reviews"));
 
     echo "<div class='g'></div>\n";
     echo "Can PC members see <strong>reviewer names</strong> except for conflicts?<br />\n";
     doRadio("pc_seeblindrev", array(0 => "Yes",
-                                    1 => "Only after completing a review for the same paper<br /><span class='hint'>This setting also hides reviewer-only comments from PC members who have not completed a review for the paper.</span>"));
+                                    1 => "Only after completing a review for the same paper<br /><span class='hint'>This setting also hides reviewer-only comments from PC members who have not completed a review for the paper.</span>",
+                                    2 => "No, cannot see reviewer names"));
 
     echo "<div class='g'></div>";
     echo "Can external reviewers see the other reviews for their assigned papers, once they’ve submitted their own?<br />\n";

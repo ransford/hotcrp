@@ -39,6 +39,7 @@ class Conference {
     const PCSEEREV_YES = 1;
     const PCSEEREV_UNLESSINCOMPLETE = 3;
     const PCSEEREV_UNLESSANYINCOMPLETE = 4;
+    const PCSEEREV_NO = 5;
 
     static public $review_deadlines = array("pcrev_soft", "pcrev_hard", "extrev_soft", "extrev_hard");
 

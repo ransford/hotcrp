@@ -1481,6 +1481,10 @@ class Contact {
         $pc_seeallrev = $Conf->setting("pc_seeallrev");
         $rights = $this->rights($prow, $forceShow);
         // policy
+        // ransford: deny all non-administrative review views
+        if (!$rights->can_administer
+            && $pc_seeallrev == Conference::PCSEEREV_NO)
+            return false;
         if ($rights->can_administer
             || (($prow->timeSubmitted > 0
                  || $rights->review_type
@@ -1540,6 +1544,9 @@ class Contact {
                  && $pc_seeallrev == Conference::PCSEEREV_UNLESSANYINCOMPLETE
                  && $this->has_outstanding_review())
             $whyNot["reviewsOutstanding"] = 1;
+        else if ($rights->allow_pc
+                 && $pc_seeallrev == Conference::PCSEEREV_NO)
+            $whyNot["reviewsHidden"] = 1;
         else if (!$Conf->time_review_open())
             $whyNot['deadline'] = "rev_open";
         else
@@ -1911,10 +1918,12 @@ class Contact {
                 && (!($pc_seeblindrev = $Conf->setting("pc_seeblindrev"))
                     || ($pc_seeblindrev == 2
                         && $this->canViewReview($prow, $rrow, $forceShow))))
+            /*
             || ($rights->allow_review
                 && $prow->review_not_incomplete($this)
                 && ($rights->allow_pc
                     || $Conf->settings["extrev_view"] >= 2))
+            */
             || !$Conf->is_review_blind($rrow))
             return true;
         return false;
