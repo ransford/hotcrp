@@ -35,7 +35,9 @@ if (isset($_REQUEST["merge"]) && check_post()) {
         else if ($MiniMe->contactId == $Me->contactId) {
             $Conf->confirmMsg("Accounts successfully merged.");
             go(hoturl("index"));
-        } else {
+        } else if (!$MiniMe->contactId || !$Me->contactId)
+            $MergeError = "Internal error.";
+        else {
             // Do they prefer the account they named?
             if (defval($_REQUEST, 'prefer')) {
                 $mm = $Me;
@@ -60,6 +62,7 @@ if (isset($_REQUEST["merge"]) && check_post()) {
 
             crpmergeone("Paper", "leadContactId", $oldid, $newid);
             crpmergeone("Paper", "shepherdContactId", $oldid, $newid);
+            crpmergeone("Paper", "managerContactId", $oldid, $newid);
 
             // paper authorship
             $result = $Conf->qe("select paperId, authorInformation from Paper where authorInformation like '%\t" . sqlq_for_like($MiniMe->email) . "\t%'");

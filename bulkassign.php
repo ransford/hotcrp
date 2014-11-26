@@ -8,6 +8,8 @@ require_once("src/papersearch.php");
 require_once("src/assigners.php");
 if (!$Me->privChair)
     $Me->escape();
+if (check_post())
+    header("X-Accel-Buffering: no");  // NGINX: do not hold on to file
 $null_mailer = new HotCRPMailer(null, null, array("requester_contact" => $Me,
                                                   "other_contact" => $Me /* backwards compat */,
                                                   "reason" => "",
@@ -26,11 +28,46 @@ function assignment_defaults() {
     return $defaults;
 }
 
+$csv_lineno = 0;
+$csv_preparing = false;
+function keep_browser_alive($assignset, $lineno, $line) {
+    global $Conf, $csv_lineno, $csv_preparing;
+    $csv_lineno = $lineno;
+    if ($lineno >= 1000) {
+        if (!$csv_preparing) {
+            echo "<div id='foldmail' class='foldc fold2o'>",
+                "<div class='fn fx2 merror'>Preparing assignments.<br /><span id='mailcount'></span></div>",
+                "</div>";
+            $csv_preparing = true;
+        }
+        if ($assignset->filename)
+            $text = "<span class='lineno'>"
+                . htmlspecialchars($assignset->filename) . ":$lineno:</span>";
+        else
+            $text = "<span class='lineno'>line $lineno:</span>";
+        if ($line === false)
+            $text .= " processing";
+        else
+            $text .= " <code>" . htmlspecialchars(join(",", $line)) . "</code>";
+        $Conf->echoScript("\$\$('mailcount').innerHTML=\"$text\";");
+        flush();
+        while (@ob_end_flush());
+            /* skip */;
+    }
+}
+
+function finish_browser_alive() {
+    global $Conf, $csv_preparing;
+    if ($csv_preparing)
+        $Conf->echoScript("fold('mail',null)");
+}
+
 
 if (isset($_REQUEST["saveassignment"]) && check_post()) {
     if (isset($_REQUEST["cancel"]))
         redirectSelf();
-    else if (isset($_REQUEST["file"])) {
+    else if (isset($_POST["file"])
+             && @$_POST["assignment_size_estimate"] < 1000) {
         $assignset = new AssignmentSet($Me, false);
         $assignset->parse($_REQUEST["file"], @$_REQUEST["filename"],
                           assignment_defaults());
@@ -69,12 +106,16 @@ Types of PC review:
 // upload review form action
 if (isset($_REQUEST["upload"]) && fileUploaded($_FILES["uploadfile"])
     && check_post()) {
+    flush();
+    while (@ob_end_flush())
+        /* do nothing */;
     if (($text = file_get_contents($_FILES["uploadfile"]["tmp_name"])) === false)
         $Conf->errorMsg("Internal error: cannot read file.");
     else {
         $assignset = new AssignmentSet($Me, false);
         $defaults = assignment_defaults();
-        $assignset->parse($text, $_FILES["uploadfile"]["name"], $defaults);
+        $assignset->parse($text, $_FILES["uploadfile"]["name"], $defaults, "keep_browser_alive");
+        finish_browser_alive();
         if ($assignset->report_errors())
             /* do nothing */;
         else if ($assignset->is_empty())
@@ -84,14 +125,19 @@ if (isset($_REQUEST["upload"]) && fileUploaded($_FILES["uploadfile"])
             $Conf->infoMsg("If this assignment looks OK to you, select “Save assignment” to apply it. (You can always alter the assignment afterwards.)");
             $assignset->echo_unparse_display();
 
+            list($atypes, $apids) = $assignset->types_and_papers(true);
             echo '<div class="g"></div>',
-                Ht::form(hoturl_post("bulkassign", "saveassignment=1")),
+                Ht::form(hoturl_post("bulkassign",
+                                     array("saveassignment" => 1,
+                                           "assigntypes" => join(" ", $atypes),
+                                           "assignpids" => join(" ", $apids)))),
                 '<div class="aahc"><div class="aa">',
                 Ht::submit("Save assignment"),
                 ' &nbsp;', Ht::submit("cancel", "Cancel"),
                 Ht::hidden("default_action", $defaults["action"]),
                 Ht::hidden("rev_roundtag", $defaults["round"]),
                 Ht::hidden("file", $text),
+                Ht::hidden("assignment_size_estimate", $csv_lineno),
                 Ht::hidden("filename", $_FILES["uploadfile"]["name"]),
                 Ht::hidden("requestreview_notify", @$_REQUEST["requestreview_notify"]),
                 Ht::hidden("requestreview_subject", @$_REQUEST["requestreview_subject"]),
@@ -101,6 +147,15 @@ if (isset($_REQUEST["upload"]) && fileUploaded($_FILES["uploadfile"])
             exit;
         }
     }
+}
+
+if (isset($_REQUEST["saveassignment"]) && check_post()
+    && isset($_POST["file"]) && @$_POST["assignment_size_estimate"] >= 1000) {
+    $assignset = new AssignmentSet($Me, false);
+    $assignset->parse($_POST["file"], @$_POST["filename"],
+                      assignment_defaults(), "keep_browser_alive");
+    $assignset->execute();
+    finish_browser_alive();
 }
 
 

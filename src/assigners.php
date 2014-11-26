@@ -4,8 +4,7 @@
 // Distributed under an MIT-like license; see LICENSE
 
 class AssignmentState {
-    private $olds = array();
-    private $news = array();
+    private $st = array();
     private $loaded = array();
     private $extra = array();
     public $contact;
@@ -18,16 +17,25 @@ class AssignmentState {
             $loader->load_state($this);
         }
     }
+    private function pidstate($pid) {
+        if (!isset($this->st[$pid]))
+            $this->st[$pid] = (object) array("olds" => array(),
+                                             "news" => array(),
+                                             "sorted" => false);
+        return $this->st[$pid];
+    }
     public function load($x) {
         assert(isset($x["pid"]));
-        @($this->olds[$x["pid"]][] = $x);
-        @($this->news[$x["pid"]][] = $x);
+        $st = $this->pidstate($x["pid"]);
+        $st->olds[] = $x;
+        $st->news[] = $x;
+        $st->sorted = false;
     }
     private function pid_keys($q) {
         if (isset($q["pid"]))
             return array($q["pid"]);
         else
-            return array_keys($this->news);
+            return array_keys($this->st);
     }
     public function match($x, $q) {
         foreach ($q as $k => $v) {
@@ -43,17 +51,46 @@ class AssignmentState {
         }
         return true;
     }
+    static public function sorter($a, $b) {
+        $x = $a && isset($a["cid"]) ? $a["cid"] : null;
+        $y = $b && isset($b["cid"]) ? $b["cid"] : null;
+        return $x === $y ? 0 : ($x === null || $x < $y ? -1 : 1);
+    }
+    private function pos($st, $k) {
+        if (!$st->sorted) {
+            usort($st->news, "AssignmentState::sorter");
+            $st->sorted = true;
+        }
+        $l = 0;
+        $r = count($st->news);
+        $T = microtime(true);
+        while ($l < $r) {
+            $m = $l + (int) (($r - $l) >> 1);
+            $cid = @$st->news[$m]["cid"];
+            if ($cid === null || $k <= $cid)
+                $r = $m;
+            else
+                $l = $m + 1;
+        }
+        return $l;
+    }
     private function query_remove($q, $remove) {
         $res = array();
         foreach ($this->pid_keys($q) as $pid) {
-            $bypid =& $this->news[$pid];
-            for ($i = 0; $i != count($bypid); ++$i)
-                if ($this->match($bypid[$i], $q)) {
-                    $res[] = $bypid[$i];
-                    if ($remove) {
-                        array_splice($bypid, $i, 1);
-                        --$i;
-                    }
+            $st = $this->pidstate($pid);
+            if (is_int(@$q["cid"])) {
+                $l = $this->pos($st, $q["cid"]);
+                $r = $this->pos($st, $q["cid"] + 1);
+            } else {
+                $l = 0;
+                $r = count($st->news);
+            }
+            for ($i = $l; $i != $r; ++$i)
+                if (!@$st->news[$i]["#"]
+                    && $this->match($st->news[$i], $q)) {
+                    $res[] = $st->news[$i];
+                    if ($remove)
+                        $st->news[$i]["#"] = true;
                 }
         }
         return $res;
@@ -66,27 +103,37 @@ class AssignmentState {
     }
     public function add($x) {
         assert(isset($x["pid"]));
-        if (!isset($this->news[$x["pid"]]))
-            $this->olds[$x["pid"]] = array();
-        $this->news[$x["pid"]][] = $x;
+        $st = $this->pidstate($x["pid"]);
+        if ($st->sorted) {
+            $k = is_int(@$x["cid"]) ? $x["cid"] : null;
+            $pos = $this->pos($st, $k);
+            if ($pos < count($st->news) && @$st->news[$pos]["#"])
+                $st->news[$pos] = $x;
+            else
+                array_splice($st->news, $pos, 0, array($x));
+        } else
+            $st->news[] = $x;
     }
     public function diff() {
         $diff = array();
-        foreach ($this->news as $pid => $newa) {
-            foreach ($this->olds[$pid] as $ox) {
-                for ($i = 0; $i != count($newa); ++$i)
-                    if ($this->match_keys($ox, $newa[$i])) {
-                        if (!$this->match($ox, $newa[$i]))
-                            @($diff[$pid][] = array($ox, $newa[$i]));
-                        array_splice($newa, $i, 1);
+        foreach ($this->st as $pid => $st) {
+            $news = $st->news;
+            foreach ($st->olds as $ox) {
+                for ($i = 0; $i != count($news); ++$i)
+                    if (!@$news[$i]["#"]
+                        && $this->match_keys($ox, $news[$i])) {
+                        if (!$this->match($ox, $news[$i]))
+                            @($diff[$pid][] = array($ox, $news[$i]));
+                        array_splice($news, $i, 1);
                         $i = false;
                         break;
                     }
                 if ($i !== false)
                     @($diff[$pid][] = array($ox, null));
             }
-            foreach ($newa as $nx)
-                @($diff[$pid][] = array(null, $nx));
+            foreach ($news as $nx)
+                if (!@$nx["#"])
+                    @($diff[$pid][] = array(null, $nx));
         }
         return $diff;
     }
@@ -144,11 +191,13 @@ class AssignerContacts {
 }
 
 class Assigner {
+    public $type;
     public $pid;
     public $contact;
     public $cid;
     static private $assigners = array();
-    function __construct($pid, $contact) {
+    function __construct($type, $pid, $contact) {
+        $this->type = $type;
         $this->pid = $pid;
         $this->contact = $contact;
         $this->cid = $contact ? $contact->contactId : null;
@@ -176,56 +225,57 @@ class Assigner {
     }
 }
 class ReviewAssigner extends Assigner {
-    private $type;
+    private $rtype;
     private $round;
     private $oldtype;
     private $notify;
-    function __construct($pid, $contact, $type, $round, $oldtype = 0, $notify = null) {
-        parent::__construct($pid, $contact);
-        $this->type = $type;
+    function __construct($pid, $contact, $rtype, $round, $oldtype = 0, $notify = null) {
+        global $reviewTypeName;
+        parent::__construct($rtype ? strtolower($reviewTypeName[$rtype]) : "noreview", $pid, $contact);
+        $this->rtype = $rtype;
         $this->round = $round;
         $this->oldtype = $oldtype;
         $this->notify = $notify;
     }
     function contact_set() {
-        if ($this->type > REVIEW_EXTERNAL)
+        if ($this->rtype > REVIEW_EXTERNAL)
             return "pc";
-        else if ($this->type == 0)
+        else if ($this->rtype == 0)
             return "reviewers";
         else
             return false;
     }
     function allow_special_contact($cclass) {
-        return $this->type == 0 && $cclass != "none";
+        return $this->rtype == 0 && $cclass != "none";
     }
     function load_state($state) {
         global $Conf;
         $result = $Conf->qe("select paperId, contactId, reviewType, reviewRound, reviewSubmitted from PaperReview");
         while (($row = edb_row($result))) {
             $round = $Conf->round_name($row[3], false);
-            $state->load(array("type" => "review", "pid" => $row[0], "cid" => $row[1],
+            $state->load(array("type" => "review", "pid" => +$row[0], "cid" => +$row[1],
                                "_rtype" => $row[2], "_round" => $round,
                                "_rsubmitted" => $row[4] > 0));
         }
     }
     function apply($pid, $contact, $req, $state, $defaults) {
         $roundname = @$req["round"];
-        if ($roundname === null && $this->type > 0 && @$defaults["round"])
+        if ($roundname === null && $this->rtype > 0 && @$defaults["round"])
             $roundname = $defaults["round"];
         if ($roundname && strcasecmp($roundname, "none") == 0)
             $roundname = "";
-        else if ($roundname && (strcasecmp($roundname, "any") != 0 || $this->type > 0)) {
+        else if ($roundname && (strcasecmp($roundname, "any") != 0 || $this->rtype > 0)) {
             if (($rerror = Conference::round_name_error($roundname)))
                 return $rerror;
         } else
             $roundname = null;
-        $rtype = $this->type;
+        $rtype = $this->rtype;
         if ($rtype == REVIEW_EXTERNAL && $contact->is_pc_member())
             $rtype = REVIEW_PC;
         $state->load_type("review", $this);
 
         // remove existing review
-        $revmatch = array("type" => "review", "pid" => $pid,
+        $revmatch = array("type" => "review", "pid" => +$pid,
                           "cid" => $contact ? $contact->contactId : null);
         if (!$rtype && @$req["round"] && $roundname !== null)
             $revmatch["_round"] = $roundname;
@@ -257,15 +307,15 @@ class ReviewAssigner extends Assigner {
                                   $new ? @$new["_notify"] : null);
     }
     function unparse_display() {
-        global $assignprefs, $Conf;
+        global $assignprefs;
         $t = Text::name_html($this->contact) . ' ';
-        if ($this->type) {
-            $t .= review_type_icon($this->type, true);
+        if ($this->rtype) {
+            $t .= review_type_icon($this->rtype, true);
             if ($this->round)
                 $t .= ' <span class="revround" title="Review round">'
                     . htmlspecialchars($this->round) . '</span>';
-            $pref = @$assignprefs["$this->pid:$this->cid"];
-            if ($pref !== "*" && $pref != 0)
+            if (@$assignprefs && ($pref = @$assignprefs["$this->pid:$this->cid"])
+                && $pref !== "*")
                 $t .= " <span class='asspref" . ($pref > 0 ? 1 : -1)
                     . "'>P" . decorateNumber($pref) . "</span>";
         } else
@@ -275,11 +325,11 @@ class ReviewAssigner extends Assigner {
     function account(&$countbycid, $nrev) {
         $countbycid[$this->cid] = @+$countbycid[$this->cid] + 1;
         if ($this->cid > 0 && isset($nrev->any[$this->cid])) {
-            $delta = $this->type ? 1 : -1;
+            $delta = $this->rtype ? 1 : -1;
             foreach (array($nrev, $nrev->pset) as $nnrev) {
-                $nnrev->any[$this->cid] += ($this->type != 0) - ($this->oldtype != 0);
-                $nnrev->pri[$this->cid] += ($this->type == REVIEW_PRIMARY) - ($this->oldtype == REVIEW_PRIMARY);
-                $nnrev->sec[$this->cid] += ($this->type == REVIEW_SECONDARY) - ($this->oldtype == REVIEW_SECONDARY);
+                $nnrev->any[$this->cid] += ($this->rtype != 0) - ($this->oldtype != 0);
+                $nnrev->pri[$this->cid] += ($this->rtype == REVIEW_PRIMARY) - ($this->oldtype == REVIEW_PRIMARY);
+                $nnrev->sec[$this->cid] += ($this->rtype == REVIEW_SECONDARY) - ($this->oldtype == REVIEW_SECONDARY);
             }
         }
     }
@@ -289,7 +339,7 @@ class ReviewAssigner extends Assigner {
     function execute($who) {
         global $Conf;
         $result = $Conf->qe("select contactId, paperId, reviewId, reviewType, reviewModified from PaperReview where paperId=$this->pid and contactId=$this->cid");
-        $who->assign_paper($this->pid, edb_orow($result), $this->cid, $this->type);
+        $who->assign_review($this->pid, edb_orow($result), $this->cid, $this->rtype);
         if ($this->notify) {
             $reviewer = Contact::find_by_id($this->cid);
             $prow = $Conf->paperRow(array("paperId" => $this->pid, "reviewer" => $this->cid), $reviewer);
@@ -298,11 +348,9 @@ class ReviewAssigner extends Assigner {
     }
 }
 class LeadAssigner extends Assigner {
-    private $type;
     private $isadd;
-    function __construct($pid, $contact, $type, $isadd) {
-        parent::__construct($pid, $contact);
-        $this->type = $type;
+    function __construct($type, $pid, $contact, $isadd) {
+        parent::__construct($type, $pid, $contact);
         $this->isadd = $isadd;
     }
     function allow_special_contact($cclass) {
@@ -312,7 +360,7 @@ class LeadAssigner extends Assigner {
         global $Conf;
         $result = $Conf->qe("select paperId, " . $this->type . "ContactId from Paper where " . $this->type . "ContactId!=0");
         while (($row = edb_row($result)))
-            $state->load(array("type" => $this->type, "pid" => $row[0], "_cid" => $row[1]));
+            $state->load(array("type" => $this->type, "pid" => +$row[0], "_cid" => +$row[1]));
     }
     function apply($pid, $contact, $req, $state, $defaults) {
         $state->load_type($this->type, $this);
@@ -323,7 +371,7 @@ class LeadAssigner extends Assigner {
     }
     function realize($old, $new, $cmap, $state) {
         $x = $new ? $new : $old;
-        return new LeadAssigner($x["pid"], $cmap->get_id($x["_cid"]), $x["type"], !!$new);
+        return new LeadAssigner($x["type"], $x["pid"], $cmap->get_id($x["_cid"]), !!$new);
     }
     function unparse_display() {
         if (!$this->cid)
@@ -336,22 +384,18 @@ class LeadAssigner extends Assigner {
         return $t;
     }
     function add_locks(&$locks) {
-        $locks["Paper"] = "write";
+        $locks["Paper"] = $locks["Settings"] = "write";
     }
     function execute($who) {
-        global $Conf;
-        if ($this->isadd)
-            $Conf->qe("update Paper set " . $this->type . "ContactId=$this->cid where paperId=$this->pid");
-        else if ($this->cid)
-            $Conf->qe("update Paper set " . $this->type . "ContactId=0 where paperId=$this->pid and " . $this->type . "ContactId=$this->cid");
-        else
-            $Conf->qe("update Paper set " . $this->type . "ContactId=0 where paperId=$this->pid");
+        $who->assign_paper_pc($this->pid, $this->type,
+                              $this->isadd ? $this->cid : 0,
+                              $this->isadd || !$this->cid ? array() : array("old_cid" => $this->cid));
     }
 }
 class ConflictAssigner extends Assigner {
     private $ctype;
     function __construct($pid, $contact, $ctype) {
-        parent::__construct($pid, $contact);
+        parent::__construct("conflict", $pid, $contact);
         $this->ctype = $ctype;
     }
     function allow_special_contact($cclass) {
@@ -361,7 +405,7 @@ class ConflictAssigner extends Assigner {
         global $Conf;
         $result = $Conf->qe("select paperId, contactId, conflictType from PaperConflict where conflictType>0");
         while (($row = edb_row($result)))
-            $state->load(array("type" => "conflict", "pid" => $row[0], "cid" => $row[1], "_ctype" => $row[2]));
+            $state->load(array("type" => "conflict", "pid" => +$row[0], "cid" => +$row[1], "_ctype" => +$row[2]));
     }
     function apply($pid, $contact, $req, $state, $defaults) {
         $state->load_type("conflict", $this);
@@ -396,13 +440,12 @@ class ConflictAssigner extends Assigner {
     }
 }
 class TagAssigner extends Assigner {
-    const TYPE = "tag";
     private $isadd;
     private $tag;
     private $index;
     private $tagger;
     function __construct($pid, $isadd, $tag, $index, $tagger = null) {
-        parent::__construct($pid, null);
+        parent::__construct("tag", $pid, null);
         $this->isadd = $isadd;
         $this->tag = $tag;
         $this->index = $index;
@@ -415,10 +458,10 @@ class TagAssigner extends Assigner {
         global $Conf;
         $result = $Conf->qe("select paperId, tag, tagIndex from PaperTag");
         while (($row = edb_row($result)))
-            $state->load(array("type" => self::TYPE, "pid" => $row[0], "tag" => $row[1], "_index" => $row[2]));
+            $state->load(array("type" => $this->type, "pid" => +$row[0], "tag" => $row[1], "_index" => +$row[2]));
     }
     function apply($pid, $contact, $req, $state, $defaults) {
-        $state->load_type(self::TYPE, $this);
+        $state->load_type($this->type, $this);
         if (!($tagger = $state->extra("tagger"))) {
             $tagger = new Tagger($state->contact);
             $state->set_extra("tagger", $tagger);
@@ -444,10 +487,10 @@ class TagAssigner extends Assigner {
             return "Index “" . htmlspecialchars($req["index"]) . "” should be an integer.";
         // save assignment
         if ($this->isadd === "set" && !$state->set_extra("tag.$tag", true))
-            $state->remove(array("type" => self::TYPE, "tag" => $tag));
-        $state->remove(array("type" => self::TYPE, "pid" => $pid, "tag" => $tag, "_index" => ($this->isadd ? null : $index)));
+            $state->remove(array("type" => $this->type, "tag" => $tag));
+        $state->remove(array("type" => $this->type, "pid" => $pid, "tag" => $tag, "_index" => ($this->isadd ? null : $index)));
         if ($this->isadd && $index !== "none")
-            $state->add(array("type" => self::TYPE, "pid" => $pid, "tag" => $tag, "_index" => ($index ? $index : 0)));
+            $state->add(array("type" => $this->type, "pid" => $pid, "tag" => $tag, "_index" => ($index ? $index : 0)));
     }
     function realize($old, $new, $cmap, $state) {
         $x = $new ? $new : $old;
@@ -455,7 +498,6 @@ class TagAssigner extends Assigner {
                                $state->extra("tagger"));
     }
     function unparse_display() {
-        global $Conf;
         $t = "#" . htmlspecialchars($this->tag);
         if ($this->index === null)
             $t = "remove $t";
@@ -469,7 +511,6 @@ class TagAssigner extends Assigner {
         $locks["PaperTag"] = "write";
     }
     function execute($who) {
-        global $Conf;
         if ($this->index === null)
             $this->tagger->save($this->pid, $this->tag, "d");
         else
@@ -477,11 +518,10 @@ class TagAssigner extends Assigner {
     }
 }
 class PreferenceAssigner extends Assigner {
-    const TYPE = "pref";
     private $pref;
     private $exp;
     function __construct($pid, $contact, $pref, $exp) {
-        parent::__construct($pid, $contact);
+        parent::__construct("pref", $pid, $contact);
         $this->pref = $pref;
         $this->exp = $exp;
     }
@@ -492,10 +532,10 @@ class PreferenceAssigner extends Assigner {
         global $Conf;
         $result = $Conf->qe("select paperId, contactId, preference, expertise from PaperReviewPreference");
         while (($row = edb_row($result)))
-            $state->load(array("type" => self::TYPE, "pid" => $row[0], "cid" => $row[1], "_pref" => $row[2], "_exp" => $row[3]));
+            $state->load(array("type" => $this->type, "pid" => +$row[0], "cid" => +$row[1], "_pref" => +$row[2], "_exp" => +$row[3]));
     }
     function apply($pid, $contact, $req, $state, $defaults) {
-        $state->load_type(self::TYPE, $this);
+        $state->load_type($this->type, $this);
 
         foreach (array("preference", "pref", "revpref") as $k)
             if (($pref = @$req[$k]) !== null)
@@ -517,9 +557,9 @@ class PreferenceAssigner extends Assigner {
             $ppref[1] = $pexp[1];
         }
 
-        $state->remove(array("type" => self::TYPE, "pid" => $pid, "cid" => $contact->contactId ? : null));
+        $state->remove(array("type" => $this->type, "pid" => $pid, "cid" => $contact->contactId ? : null));
         if ($ppref[0] || $ppref[1] !== null)
-            $state->add(array("type" => self::TYPE, "pid" => $pid, "cid" => $contact->contactId ? : null, "_pref" => $ppref[0], "_exp" => $ppref[1]));
+            $state->add(array("type" => $this->type, "pid" => $pid, "cid" => $contact->contactId ? : null, "_pref" => $ppref[0], "_exp" => $ppref[1]));
     }
     function realize($old, $new, $cmap, $state) {
         $x = $new ? $new : $old;
@@ -528,13 +568,12 @@ class PreferenceAssigner extends Assigner {
     function unparse_display() {
         if (!$this->cid)
             return "remove all preferences";
-        return Text::name_html($this->contact) . " " . unparse_preference_span(array($this->pref, $this->exp));
+        return Text::name_html($this->contact) . " " . unparse_preference_span(array($this->pref, $this->exp), true);
     }
     function add_locks(&$locks) {
         $locks["PaperReviewPreference"] = "write";
     }
     function execute($who) {
-        global $Conf;
         if (!$this->pref && $this->exp === null)
             Dbl::qe("delete from PaperReviewPreference where paperId=? and contactId=?", $this->pid, $this->cid);
         else
@@ -553,12 +592,12 @@ Assigner::register("extreview", new ReviewAssigner(0, null, REVIEW_EXTERNAL, "")
 Assigner::register("ext", new ReviewAssigner(0, null, REVIEW_EXTERNAL, ""));
 Assigner::register("noreview", new ReviewAssigner(0, null, 0, ""));
 Assigner::register("clearreview", new ReviewAssigner(0, null, 0, ""));
-Assigner::register("lead", new LeadAssigner(0, null, "lead", true));
-Assigner::register("nolead", new LeadAssigner(0, null, "lead", false));
-Assigner::register("clearlead", new LeadAssigner(0, null, "lead", false));
-Assigner::register("shepherd", new LeadAssigner(0, null, "shepherd", true));
-Assigner::register("noshepherd", new LeadAssigner(0, null, "shepherd", false));
-Assigner::register("clearshepherd", new LeadAssigner(0, null, "shepherd", false));
+Assigner::register("lead", new LeadAssigner("lead", 0, null, true));
+Assigner::register("nolead", new LeadAssigner("lead", 0, null, false));
+Assigner::register("clearlead", new LeadAssigner("lead", 0, null, false));
+Assigner::register("shepherd", new LeadAssigner("shepherd", 0, null, true));
+Assigner::register("noshepherd", new LeadAssigner("shepherd", 0, null, false));
+Assigner::register("clearshepherd", new LeadAssigner("shepherd", 0, null, false));
 Assigner::register("conflict", new ConflictAssigner(0, null, CONFLICT_CHAIRMARK));
 Assigner::register("noconflict", new ConflictAssigner(0, null, 0));
 Assigner::register("clearconflict", new ConflictAssigner(0, null, 0));
@@ -572,7 +611,7 @@ Assigner::register("revpref", new PreferenceAssigner(0, null, 0, null));
 
 class AssignmentSet {
     private $assigners = array();
-    private $filename;
+    public $filename;
     private $errors = array();
     private $my_conflicts = null;
     private $contact;
@@ -649,8 +688,6 @@ class AssignmentSet {
     }
 
     private function lookup_users(&$req, $pc_by_email, $assigner, $csv) {
-        global $Conf;
-
         // move all usable identification data to email, firstName, lastName
         foreach (array("first" => "firstName", "last" => "lastName",
                        "firstname" => "firstName", "lastname" => "lastName")
@@ -747,7 +784,7 @@ class AssignmentSet {
         return array($contact);
     }
 
-    function parse($text, $filename = null, $defaults = null) {
+    function parse($text, $filename = null, $defaults = null, $alertf = null) {
         if ($defaults === null)
             $defaults = array();
         $this->filename = $filename;
@@ -799,8 +836,14 @@ class AssignmentSet {
         $searches = array();
 
         // parse file
+        $N = 0;
         while (($req = $csv->next()) !== false) {
             // parse paper
+            if (++$N % 100 == 0) {
+                if ($alertf)
+                    call_user_func($alertf, $this, $csv->lineno(), $req);
+                set_time_limit(30);
+            }
             $pfield = @trim($req["paper"]);
             if ($pfield !== "" && ctype_digit($pfield))
                 $pids = array(intval($pfield));
@@ -834,7 +877,8 @@ class AssignmentSet {
 
             // check action
             if (($action = @$req["assignment"]) === null
-                && ($action = @$req["action"]) === null)
+                && ($action = @$req["action"]) === null
+                && ($action = @$req["type"]) === null)
                 $action = $defaults["action"];
             $action = strtolower(trim($action));
             if (!($assigner = Assigner::find($action))) {
@@ -858,6 +902,8 @@ class AssignmentSet {
                         $this->error($csv->lineno(), $err);
                 }
         }
+        if ($alertf)
+            call_user_func($alertf, $this, $csv->lineno(), false);
 
         // create assigners for difference
         foreach ($this->astate->diff() as $pid => $difflist)
@@ -868,8 +914,35 @@ class AssignmentSet {
             }
     }
 
+    function types_and_papers($compress_pids = false) {
+        $types = array();
+        $pids = array();
+        foreach ($this->assigners as $assigner) {
+            $types[$assigner->type] = true;
+            if ($assigner->pid)
+                $pids[$assigner->pid] = true;
+        }
+        ksort($types);
+        ksort($pids, SORT_NUMERIC);
+        $pids = array_keys($pids);
+        if ($compress_pids) {
+            $xpids = array();
+            $lpid = $rpid = -1;
+            foreach ($pids as $pid) {
+                if ($lpid >= 0 && $pid != $rpid + 1)
+                    $xpids[] = $lpid == $rpid ? $lpid : "$lpid-$rpid";
+                if ($lpid < 0 || $pid != $rpid + 1)
+                    $lpid = $pid;
+                $rpid = $pid;
+            }
+            if ($lpid >= 0)
+                $xpids[] = $lpid == $rpid ? $lpid : "$lpid-$rpid";
+            $pids = $xpids;
+        }
+        return array(array_keys($types), $pids);
+    }
+
     function echo_unparse_display($papersel = null) {
-        global $Conf;
         if (!$papersel) {
             $papersel = array();
             foreach ($this->assigners as $assigner)
@@ -913,7 +986,7 @@ class AssignmentSet {
         }
 
         ksort(AutoassignmentPaperColumn::$info);
-        $papers = join(" ", array_keys(AutoAssignmentPaperColumn::$info));
+        $papers = join(" ", array_keys(AutoassignmentPaperColumn::$info));
         $search = new PaperSearch($this->contact,
                                   array("t" => defval($_REQUEST, "t", "s"),
                                         "q" => $papers !== "" ? $papers : "NONE"));
@@ -971,8 +1044,8 @@ class AssignmentSet {
         // create new contacts outside the lock
         $locks = array("ContactInfo" => "read", "PCMember" => "read",
                        "ChairAssistant" => "read", "Chair" => "read",
-                       "ActionLog" => "write", "Paper" => "read",
-                       "PaperConflict" => "read");
+                       "Paper" => "read", "PaperConflict" => "read");
+        $Conf->save_logs(true);
         foreach ($this->assigners as $assigner) {
             if ($assigner->contact->contactId < 0) {
                 $c = $this->cmap->get_email($assigner->contact->email);
@@ -997,6 +1070,7 @@ class AssignmentSet {
             $assigner->execute($this->contact);
 
         $Conf->qe("unlock tables");
+        $Conf->save_logs(false);
 
         // confirmation message
         if ($Conf->setting("pcrev_assigntime") == $Now)
