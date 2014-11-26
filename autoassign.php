@@ -422,6 +422,7 @@ function doAssign() {
 
         // traverse preferences in descending order until encountering an
         // assignable paper
+        $pg = null;
         while ($pref_groups[$pc] && ($pg = current($pref_groups[$pc]))) {
             // skip if no papers left
             if (!count($pg->pids)) {
@@ -485,7 +486,7 @@ function doAssign() {
 if (isset($_REQUEST["assign"]) && isset($_REQUEST["a"])
     && isset($_REQUEST["pctyp"]) && check_post())
     doAssign();
-else if (isset($_REQUEST["saveassign"])
+else if (@$_REQUEST["saveassignment"] && @$_REQUEST["submit"]
          && isset($_REQUEST["assignment"]) && check_post()) {
     $assignset = new AssignmentSet($Me, true);
     $assignset->parse($_REQUEST["assignment"]);
@@ -548,11 +549,17 @@ if (isset($assignments) && count($assignments) > 0) {
 
     $assignset = new AssignmentSet($Me, true);
     $assignset->parse(join("\n", $assignments));
+    $assignset->report_errors();
     $assignset->echo_unparse_display($papersel);
 
+    list($atypes, $apids) = $assignset->types_and_papers(true);
     echo "<div class='g'></div>",
-        "<form method='post' action='", hoturl_post("autoassign"), "' accept-charset='UTF-8'><div class='aahc'><div class='aa'>\n",
-        Ht::submit("saveassign", "Save assignment"), "\n&nbsp;",
+        Ht::form(hoturl_post("autoassign",
+                             array("saveassignment" => 1,
+                                   "assigntypes" => join(" ", $atypes),
+                                   "assignpids" => join(" ", $apids)))),
+        "<div class='aahc'><div class='aa'>\n",
+        Ht::submit("submit", "Save assignment"), "\n&nbsp;",
         Ht::submit("cancel", "Cancel"), "\n";
     foreach (array("t", "q", "a", "revtype", "revaddtype", "revpctype", "cleartype", "revct", "revaddct", "revpcct", "pctyp", "balance", "badpairs", "bpcount", "rev_roundtag") as $t)
         if (isset($_REQUEST[$t]))
@@ -730,11 +737,8 @@ $badPairSelector = null;
 
 function bpSelector($i, $which) {
     global $numBadPairs, $badPairSelector, $pcm;
-    if (!$badPairSelector) {
-        $badPairSelector = array("0" => "(PC member)");
-        foreach ($pcm as $pc)
-            $badPairSelector[$pc->contactId] = Text::name_html($pc);
-    }
+    if (!$badPairSelector)
+        $badPairSelector = pc_members_selector_options("(PC member)");
     $selected = ($i <= $_REQUEST["bpcount"] ? defval($_REQUEST, "bp$which$i") : "0");
     if ($selected && isset($badPairSelector[$selected]))
         $numBadPairs = max($i, $numBadPairs);

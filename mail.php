@@ -123,6 +123,7 @@ class MailSender {
             echo "<div id='foldmail' class='foldc fold2c'>",
                 "<div class='fn fx2 merror'>In the process of sending mail.  <strong>Do not leave this page until this message disappears!</strong><br /><span id='mailcount'></span></div>",
                 "<div id='mailwarnings'></div>",
+                "<span id='mailinfo'></span>",
                 "<div class='fx'><div class='confirm'>Sent mail as follows.</div>",
                 "<div class='aa'>",
                 Ht::submit("go", "Prepare more mail"),
@@ -185,6 +186,7 @@ class MailSender {
         $cbkey = "c" . join("_", $prep->contacts) . "p" . $prep->paperId;
         if ($this->sending && !defval($_REQUEST, $cbkey))
             return;
+        set_time_limit(30);
         $this->echo_prologue();
 
         self::fix_body($prep);

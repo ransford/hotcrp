@@ -312,7 +312,6 @@ function tagaction() {
             $source_tag = (substr($tag, 0, 2) == "~~" ? substr($tag, 2) : $tag);
         if ($tagger->check($tag, Tagger::NOPRIVATE | Tagger::NOVALUE)
             && $tagger->check($source_tag, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE)) {
-            ini_set("max_execution_time", 1200);
             $r = new PaperRank($source_tag, $tag, $papers,
                                defval($_REQUEST, "tagcr_gapless"),
                                "Search", "search");
@@ -863,25 +862,32 @@ if (isset($_REQUEST["setdecision"]) && defval($_REQUEST, "decision", "") != ""
     }
 
 
-// mark conflicts/PC-authored papers
+// "Assign"
 if (isset($_REQUEST["setassign"]) && defval($_REQUEST, "marktype", "") != ""
     && SearchActions::any() && check_post()) {
     $mt = $_REQUEST["marktype"];
-    $mpc = defval($_REQUEST, "markpc", "");
+    $mpc = defval($_REQUEST, "markpc", "0");
+    $pc = ($mpc == "0" ? null : Contact::find_by_email($mpc));
+
     if (!$Me->privChair)
         $Conf->errorMsg("Only PC chairs can set assignments and conflicts.");
-    else if ($mt == "xauto") {
+    else if ($mt == "auto") {
         $t = (in_array($_REQUEST["t"], array("acc", "s")) ? $_REQUEST["t"] : "all");
         $q = join("+", SearchActions::selection());
         go(hoturl("autoassign", "pap=$q&t=$t&q=$q"));
-    } else if (!$mpc || !($pc = Contact::find_by_email($mpc)))
+    } else if ($mt == "lead" || $mt == "shepherd") {
+        if ($Me->assign_paper_pc(SearchActions::selection(), $mt, $pc))
+            $Conf->confirmMsg(ucfirst(pluralx(SearchActions::selection(), $mt)) . " set.");
+        else if ($OK)
+            $Conf->confirmMsg("No changes.");
+    } else if (!$pc)
         $Conf->errorMsg("“" . htmlspecialchars($mpc) . "” is not a PC member.");
     else if ($mt == "conflict" || $mt == "unconflict") {
         if ($mt == "conflict") {
-            $Conf->qe("insert into PaperConflict (paperId, contactId, conflictType) (select paperId, $pc->contactId, " . CONFLICT_CHAIRMARK . " from Paper where paperId" . SearchActions::sql_predicate() . ") on duplicate key update conflictType=greatest(conflictType, values(conflictType))");
+            Dbl::qe("insert into PaperConflict (paperId, contactId, conflictType) (select paperId, ?, ? from Paper where paperId" . SearchActions::sql_predicate() . ") on duplicate key update conflictType=greatest(conflictType, values(conflictType))", $pc->contactId, CONFLICT_CHAIRMARK);
             $Me->log_activity("Mark conflicts with $mpc", SearchActions::selection());
         } else {
-            $Conf->qe("delete from PaperConflict where PaperConflict.conflictType<" . CONFLICT_AUTHOR . " and contactId=$pc->contactId and (paperId" . SearchActions::sql_predicate() . ")");
+            Dbl::qe("delete from PaperConflict where PaperConflict.conflictType<? and contactId=? and (paperId" . SearchActions::sql_predicate() . ")", CONFLICT_AUTHOR, $pc->contactId);
             $Me->log_activity("Remove conflicts with $mpc", SearchActions::selection());
         }
     } else if (substr($mt, 0, 6) == "assign"
@@ -897,7 +903,7 @@ if (isset($_REQUEST["setassign"]) && defval($_REQUEST, "marktype", "") != ""
             else if ($asstype && $row->reviewType >= REVIEW_PC && $asstype != $row->reviewType)
                 $assigned[] = $row->paperId;
             else {
-                $Me->assign_paper($row->paperId, $row, $pc->contactId, $asstype);
+                $Me->assign_review($row->paperId, $row, $pc->contactId, $asstype);
                 $nworked++;
             }
         }
