@@ -11,6 +11,9 @@ if (isset($_REQUEST["get"]))
 else if (isset($_REQUEST["getgo"]) && isset($_REQUEST["getaction"]))
     $getaction = $_REQUEST["getaction"];
 
+// ransford: hack: non-chair == non-PC
+if (!$Me->privChair)
+    $Me->isPC = false;
 
 // list type
 $tOpt = array();

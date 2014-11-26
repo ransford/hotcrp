@@ -500,6 +500,10 @@ class ContactList extends BaseList {
     function _rows($queryOptions) {
         global $Conf;
 
+        // ransford: limit non-administrators' view to administrators
+        if (!$this->contact->privChair && $this->limit == "pc")
+            $this->limit = "admin";
+
         $aulimit = (strlen($this->limit) >= 2 && $this->limit[0] == 'a' && $this->limit[1] == 'u');
         $pq = "select u.contactId,
         u.contactId as paperId,
