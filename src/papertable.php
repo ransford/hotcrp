@@ -387,7 +387,6 @@ class PaperTable {
         }
         if (@$opt->description)
             echo "<div class='paphint'>", $opt->description, "</div>";
-        echo "<div class='paphint'>Please merge multiple PDF submissions into a single PDF file before submitting.</div>";
         echo "<div class='papv'>";
 
         // current version, if any
