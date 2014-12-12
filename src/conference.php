@@ -1278,6 +1278,7 @@ class Conference {
                 max($myPaperReview.reviewType) as myReviewType,
                 max($myPaperReview.reviewSubmitted) as myReviewSubmitted,
                 min($myPaperReview.reviewNeedsSubmit) as myReviewNeedsSubmit,
+                $myPaperReview.contactId as myReviewContactId,
                 PaperReview.reviewRound";
         } else
             $pq .= ",\nnull reviewType, null reviewId, null myReviewType";
@@ -1707,10 +1708,12 @@ class Conference {
                 PaperConflict.conflictType,
                 MyPaperReview.reviewType as myReviewType,
                 MyPaperReview.reviewSubmitted as myReviewSubmitted,
-                MyPaperReview.reviewNeedsSubmit as myReviewNeedsSubmit\n";
+                MyPaperReview.reviewNeedsSubmit as myReviewNeedsSubmit,
+                MyPaperReview.contactId as myReviewContactId\n";
     }
 
     private function _commentFlowQuery($contact, $t0, $limit) {
+        // XXX review tokens
         $q = "select PaperComment.*,
                 substring(PaperComment.comment from 1 for 300) as shortComment,\n"
             . $this->_flowQueryRest()
@@ -1730,6 +1733,7 @@ class Conference {
     }
 
     private function _reviewFlowQuery($contact, $t0, $limit) {
+        // XXX review tokens
         $q = "select PaperReview.*,\n"
             . $this->_flowQueryRest()
             . "\t\tfrom PaperReview
@@ -2177,6 +2181,8 @@ class Conference {
             header("Content-Type: text/plain");
         else
             header("Content-Type: application/json");
+        if (check_post())
+            header("Access-Control-Allow-Origin: *");
         echo json_encode($values);
     }
 

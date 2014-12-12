@@ -8,7 +8,6 @@ require_once("src/initweb.php");
 require_once("src/papertable.php");
 if ($Me->is_empty())
     $Me->escape();
-$useRequest = isset($_REQUEST["after_login"]);
 
 
 // header
@@ -45,7 +44,8 @@ function loadRows() {
             || ($cid == "response" && ($row->commentType & COMMENTTYPE_RESPONSE)))
             $crow = $row;
     }
-    if ($cid != "xxx" && !$crow && $cid != "response" && $cid != "new" && $cid != "newresponse")
+    if ($cid != "xxx" && !$crow && $cid != "response"
+        && $cid != "new" && $cid != "newresponse")
         errorMsgExit("That comment does not exist.");
     if (isset($Error["paperId"]) && $Error["paperId"] != $prow->paperId)
         $Error = array();
@@ -62,12 +62,20 @@ if (isset($_REQUEST["post"]) && $_REQUEST["post"] && !count($_POST))
 // update comment action
 function saveComment($text, $is_response) {
     global $Me, $Conf, $prow, $crow;
+
+    // If I have a review token for this paper, save under that anonymous user.
+    $user = $Me;
+    if ((!$crow || $crow->contactId != $Me->contactId)
+        && ($cid = $Me->review_token_cid($prow))
+        && (!$crow || $crow->contactId == $cid))
+        $user = Contact::find_by_id($cid);
+
     $req = array("visibility" => @$_REQUEST["visibility"],
                  "submit" => $is_response && @$_REQUEST["submitresponse"],
                  "text" => $text,
                  "tags" => @$_REQUEST["commenttags"],
                  "blind" => @$_REQUEST["blind"]);
-    $next_crow = CommentSave::save($req, $prow, $crow, $Me, $is_response);
+    $next_crow = CommentSave::save($req, $prow, $crow, $user, $is_response);
     $what = ($is_response ? "Response" : "Comment");
 
     $confirm = false;
@@ -97,7 +105,6 @@ function saveComment($text, $is_response) {
         $Conf->confirmMsg("$what deleted.");
 
     if (@$_REQUEST["ajax"]) {
-        $cv = new CommentView;
         $j = array("ok" => $next_crow !== false);
         if (@$next_crow) {
             $cv = new CommentView;
@@ -129,7 +136,6 @@ else if ((@$_REQUEST["submitcomment"] || @$_REQUEST["submitresponse"] || @$_REQU
         saveComment($text, true);
     if (@$_REQUEST["ajax"])
         $Conf->ajaxExit(array("ok" => false));
-    $useRequest = true;
 } else if (@$_REQUEST["submitcomment"]) {
     $text = @rtrim($_REQUEST["comment"]);
     if (!$Me->canSubmitComment($prow, $crow, $whyNot))
@@ -140,7 +146,6 @@ else if ((@$_REQUEST["submitcomment"] || @$_REQUEST["submitresponse"] || @$_REQU
         saveComment($text, false);
     if (@$_REQUEST["ajax"])
         $Conf->ajaxExit(array("ok" => false));
-    $useRequest = true;
 } else if ((@$_REQUEST["deletecomment"] || @$_REQUEST["deleteresponse"]) && $crow) {
     if (!$Me->canSubmitComment($prow, $crow, $whyNot))
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
@@ -148,7 +153,6 @@ else if ((@$_REQUEST["submitcomment"] || @$_REQUEST["submitresponse"] || @$_REQU
         saveComment("", ($crow->commentType & COMMENTTYPE_RESPONSE) != 0);
     if (@$_REQUEST["ajax"])
         $Conf->ajaxExit(array("ok" => false));
-    $useRequest = true;
 } else if (@$_REQUEST["cancel"] && $crow)
     $_REQUEST["noedit"] = 1;
 

@@ -4,28 +4,30 @@
 // Distributed under an MIT-like license; see LICENSE
 
 class SearchOperator {
-    var $op;
-    var $unary;
-    var $precedence;
+    public $op;
+    public $unary;
+    public $precedence;
     function __construct($what, $unary, $precedence) {
         $this->op = $what;
         $this->unary = $unary;
         $this->precedence = $precedence;
     }
+
+    static public $list;
 }
 
-global $searchOperators;
-$searchOperators = array("(" => new SearchOperator("(", true, null),
-                         "NOT" => new SearchOperator("not", true, 6),
-                         "-" => new SearchOperator("not", true, 6),
-                         "+" => new SearchOperator("+", true, 6),
-                         "SPACE" => new SearchOperator("and", false, 5),
-                         "AND" => new SearchOperator("and", false, 4),
-                         "OR" => new SearchOperator("or", false, 3),
-                         "XAND" => new SearchOperator("and", false, 2),
-                         "XOR" => new SearchOperator("or", false, 2),
-                         "THEN" => new SearchOperator("then", false, 1),
-                         ")" => null);
+SearchOperator::$list =
+        array("(" => new SearchOperator("(", true, null),
+              "NOT" => new SearchOperator("not", true, 6),
+              "-" => new SearchOperator("not", true, 6),
+              "+" => new SearchOperator("+", true, 6),
+              "SPACE" => new SearchOperator("and2", false, 5),
+              "AND" => new SearchOperator("and", false, 4),
+              "OR" => new SearchOperator("or", false, 3),
+              "XAND" => new SearchOperator("and2", false, 2),
+              "XOR" => new SearchOperator("or", false, 2),
+              "THEN" => new SearchOperator("then", false, 1),
+              ")" => null);
 
 class SearchTerm {
     var $type;
@@ -100,7 +102,8 @@ class SearchTerm {
         return $this->type == "f";
     }
     function islistcombiner() {
-        return $this->type == "and" || $this->type == "or" || $this->type == "then";
+        return $this->type == "and" || $this->type == "and2"
+            || $this->type == "or" || $this->type == "then";
     }
     function set($k, $v) {
         $this->$k = $v;
@@ -1141,13 +1144,22 @@ class PaperSearch {
     }
 
     static private function find_end_balanced_parens($str) {
-        $pcount = 0;
+        $pcount = $quote = 0;
         for ($pos = 0; $pos < strlen($str)
-                 && (!ctype_space($str[$pos]) || $pcount); ++$pos)
-            if ($str[$pos] === "(")
+                 && (!ctype_space($str[$pos]) || $pcount || $quote); ++$pos) {
+            $ch = $str[$pos];
+            if ($quote) {
+                if ($ch === "\\" && $pos + 1 < strlen($str))
+                    ++$pos;
+                else if ($ch === "\"")
+                    $quote = 0;
+            } else if ($ch === "\"")
+                $quote = 1;
+            else if ($ch === "(" || $ch === "[" || $ch === "{")
                 ++$pcount;
-            else if ($str[$pos] === ")")
+            else if ($ch === ")" || $ch === "]" || $ch === "}")
                 --$pcount;
+        }
         return $pos;
     }
 
@@ -1497,8 +1509,6 @@ class PaperSearch {
     }
 
     function _searchQueryType($str) {
-        global $searchOperators;
-
         $stack = array();
         $defkwstack = array();
         $defkw = $next_defkw = null;
@@ -1509,11 +1519,11 @@ class PaperSearch {
 
         while ($str !== "") {
             list($opstr, $nextstr) = self::_searchPopKeyword($str);
-            $op = $opstr ? $searchOperators[$opstr] : null;
+            $op = $opstr ? SearchOperator::$list[$opstr] : null;
 
             if ($curqe && (!$op || $op->unary)) {
                 list($opstr, $op, $nextstr) =
-                    array("", $searchOperators["SPACE"], $str);
+                    array("", SearchOperator::$list["SPACE"], $str);
             }
 
             if ($opstr === null) {
@@ -1615,15 +1625,13 @@ class PaperSearch {
             return $qe;
         } else if (count($x->qe) == 1)
             return $x->qe[0];
-        else if ($x->op->op == "and" && $x->op->precedence == 2)
+        else if ($x->op->op == "and2" && $x->op->precedence == 2)
             return "(" . join(" ", $x->qe) . ")";
         else
             return "(" . join(strtoupper(" " . $x->op->op . " "), $x->qe) . ")";
     }
 
     static function _canonicalizeQueryType($str, $type) {
-        global $searchOperators;
-
         $stack = array();
         $parens = 0;
         $defaultop = ($type == "all" ? "XAND" : "XOR");
@@ -1632,11 +1640,11 @@ class PaperSearch {
 
         while ($str !== "") {
             list($opstr, $nextstr) = self::_searchPopKeyword($str);
-            $op = $opstr ? $searchOperators[$opstr] : null;
+            $op = $opstr ? SearchOperator::$list[$opstr] : null;
 
             if ($curqe && (!$op || $op->unary)) {
                 list($opstr, $op, $nextstr) =
-                    array("", $searchOperators[$parens ? "XAND" : $defaultop], $str);
+                    array("", SearchOperator::$list[$parens ? "XAND" : $defaultop], $str);
             }
 
             if ($opstr === null) {
@@ -1669,7 +1677,7 @@ class PaperSearch {
         }
 
         if ($type == "none")
-            array_unshift($stack, (object) array("op" => $searchOperators["NOT"], "qe" => array()));
+            array_unshift($stack, (object) array("op" => SearchOperator::$list["NOT"], "qe" => array()));
         while (count($stack))
             $curqe = self::_canonicalizePopStack($curqe, $stack);
         return $curqe;
@@ -1704,7 +1712,7 @@ class PaperSearch {
             return $this->_queryCleanOr($qe);
         else if ($qe->type == "then")
             return $this->_queryCleanThen($qe, $below);
-        else if ($qe->type == "and")
+        else if ($qe->type == "and" || $qe->type == "and2")
             return $this->_queryCleanAnd($qe);
         else
             return $qe;
@@ -1791,7 +1799,7 @@ class PaperSearch {
 
         foreach ($qe->value as $qv) {
             $qv = SearchTerm::extract_float($float, $this->_queryClean($qv, true));
-            if ($qv && $qv->type == "pn") {
+            if ($qv && $qv->type == "pn" && $qe->type == "and2") {
                 $pn[0] = array_merge($pn[0], $qv->value[0]);
                 $pn[1] = array_merge($pn[1], $qv->value[1]);
             } else if ($qv && $qv->type == "revadj")
@@ -1850,7 +1858,7 @@ class PaperSearch {
         $adjustments = array("round", "rate");
         if ($qe->type == "not")
             $this->_queryAdjustReviews($qe->value, $revadj);
-        else if ($qe->type == "and") {
+        else if ($qe->type == "and" || $qe->type == "and2") {
             $myrevadj = ($qe->value[0]->type == "revadj" ? $qe->value[0] : null);
             if ($myrevadj) {
                 $used_revadj = false;
@@ -1887,9 +1895,11 @@ class PaperSearch {
     }
 
     function _queryExtractInfo($qe, $top, &$contradictions) {
-        if ($qe->type == "and" || $qe->type == "or" || $qe->type == "then") {
+        if ($qe->type == "and" || $qe->type == "and2"
+            || $qe->type == "or" || $qe->type == "then") {
+            $isand = $qe->type == "and" || $qe->type == "and2";
             foreach ($qe->value as $qv)
-                $this->_queryExtractInfo($qv, $top && $qe->type == "and", $contradictions);
+                $this->_queryExtractInfo($qv, $top && $isand, $contradictions);
         }
         if (($x = $qe->get("regex"))) {
             $this->regex[$x[0]] = defval($this->regex, $x[0], array());
@@ -2257,7 +2267,7 @@ class PaperSearch {
             if (!count($ff))
                 $ff[] = "true";
             $f[] = "not (" . join(" or ", $ff) . ")";
-        } else if ($tt == "and") {
+        } else if ($tt == "and" || $tt == "and2") {
             $ff = array();
             foreach ($t->value as $subt)
                 $this->_clauseTermSet($subt, $sqi, $ff);
@@ -2440,7 +2450,7 @@ class PaperSearch {
             }
         } else if ($tt == "not") {
             return !$this->_clauseTermCheck($t->value, $row);
-        } else if ($tt == "and") {
+        } else if ($tt == "and" || $tt == "and2") {
             foreach ($t->value as $subt)
                 if (!$this->_clauseTermCheck($subt, $row))
                     return false;
@@ -2604,6 +2614,8 @@ class PaperSearch {
                     $qm = "(" . substr($cm->sql, 1) . ")";
                 else if (($pos = strpos($cm->sql, "@")) !== false)
                     $qm = "(email like '" . substr($cm->sql, 0, $pos + 1) . "%" . substr($cm->sql, $pos + 1) . "%')";
+                else if (strcasecmp($cm->sql, "anonymous") == 0)
+                    $qm = "(email regexp '^anonymous[0-9]*\$')";
                 else if (preg_match('/\A(.*?)\s*([,\s])\s*(.*)\z/', $cm->sql, $m)) {
                     if ($m[2] == ",")
                         $qm = "(firstName like '" . trim($m[3]) . "%' and lastName like '" . trim($m[1]) . "%')";

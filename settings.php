@@ -338,7 +338,7 @@ function save_tags($set, $what) {
     }
 
     if ($set)
-        Tagger::invalidate_defined_tags();
+        TagInfo::invalidate_defined_tags();
 }
 
 function save_topics($set) {
@@ -1936,7 +1936,7 @@ function doTagsGroup() {
     if (count($Error) > 0)
         $v = defval($_POST, "tag_chair", "");
     else
-        $v = join(" ", array_keys($tagger->chair_tags()));
+        $v = join(" ", array_keys(TagInfo::chair_tags()));
     echo "<td>", Ht::hidden("has_tag_chair", 1);
     doEntry("tag_chair", $v, 40, "");
     echo "<br /><div class='hint'>Only PC chairs can change these tags.  (PC members can still <i>view</i> the tags.)</div></td></tr>";
@@ -1946,7 +1946,7 @@ function doTagsGroup() {
         $v = defval($_POST, "tag_vote", "");
     else {
         $x = "";
-        foreach ($tagger->vote_tags() as $n => $v)
+        foreach (TagInfo::vote_tags() as $n => $v)
             $x .= "$n#$v ";
         $v = trim($x);
     }
@@ -1971,7 +1971,7 @@ function doTagsGroup() {
                    PREG_SET_ORDER);
     $tag_colors = array();
     foreach ($m as $x)
-        $tag_colors[Tagger::canonical_color($x[2])][] = $x[1];
+        $tag_colors[TagInfo::canonical_color($x[2])][] = $x[1];
     $tag_colors_open = 0;
     $tag_colors_rows = array();
     foreach (explode("|", $TagStyles) as $k) {

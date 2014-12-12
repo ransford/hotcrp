@@ -106,13 +106,15 @@ class MeetingTracker {
                 $p->pid = (int) $row->paperId;
                 $p->title = $row->title;
             }
-            if ($row->managerContactId == $acct->contactId)
+            if ($acct->contactId > 0
+                && $row->managerContactId == $acct->contactId)
                 $p->is_manager = true;
             if ($row->reviewType)
                 $p->is_reviewer = true;
             if ($row->conflictType)
                 $p->is_conflict = true;
-            if ($row->leadContactId == $acct->contactId)
+            if ($acct->contactId > 0
+                && $row->leadContactId == $acct->contactId)
                 $p->is_lead = true;
         }
 
@@ -168,8 +170,10 @@ class MeetingTracker {
     }
 
     static function tracker_status($tracker) {
-        if ($tracker)
+        if ($tracker && @$tracker->position_at)
             return $tracker->trackerid . "@" . $tracker->position_at;
+        else if ($tracker)
+            return $tracker->trackerid;
         else
             return "off";
     }

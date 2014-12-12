@@ -63,7 +63,6 @@ class AssignmentState {
         }
         $l = 0;
         $r = count($st->news);
-        $T = microtime(true);
         while ($l < $r) {
             $m = $l + (int) (($r - $l) >> 1);
             $cid = @$st->news[$m]["cid"];
@@ -470,8 +469,7 @@ class TagAssigner extends Assigner {
             return "tag missing";
         else if (!($tag = $tagger->check($tag)))
             return $tagger->error_html;
-        else if (!$state->contact->privChair
-                 && $tagger->is_chair($tag))
+        else if (!$state->contact->privChair && TagInfo::is_chair($tag))
             return "Tag “" . htmlspecialchars($tag) . "” can only be changed by the chair.";
         // index parsing
         $index = @$req["index"];
@@ -997,11 +995,10 @@ class AssignmentSet {
         echo "<div class='g'></div>";
         echo "<h3>Assignment summary</h3>\n";
         echo '<table class="pctb"><tr><td class="pctbcolleft"><table>';
-        $colorizer = new Tagger;
         $pcdesc = array();
         foreach (pcMembers() as $cid => $pc) {
             $nnew = @+$countbycid[$cid];
-            $color = $colorizer->color_classes($pc->all_contact_tags());
+            $color = TagInfo::color_classes($pc->all_contact_tags());
             $color = ($color ? ' class="' . $color . '"' : "");
             $c = "<tr$color><td class='pctbname pctbl'>"
                 . Text::name_html($pc)

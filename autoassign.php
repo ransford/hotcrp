@@ -353,6 +353,7 @@ function doAssign() {
     foreach ($pcm as $pc => $pcval) {
         arsort($prefs[$pc]);
         $last_group = null;
+        $pref_groups[$pc] = array();
         foreach ($prefs[$pc] as $pid => $pref)
             if (!$last_group || $pref != $last_group->pref) {
                 $last_group = (object) array("pref" => $pref, "pids" => array($pid));
@@ -706,10 +707,9 @@ $pcm = pcMembers();
 $nrev = AssignmentSet::count_reviews();
 $nrev->pset = AssignmentSet::count_reviews($papersel);
 $pcdesc = array();
-$colorizer = new Tagger;
 foreach ($pcm as $id => $p) {
     $count = count($pcdesc) + 1;
-    $color = $colorizer->color_classes($p->all_contact_tags());
+    $color = TagInfo::color_classes($p->all_contact_tags());
     $color = ($color ? " class='${color}'" : "");
     $c = "<tr$color><td class='pctbl'>"
         . Ht::checkbox("pcs[]", $id, isset($pcsel[$id]),
