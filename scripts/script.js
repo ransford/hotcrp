@@ -4,7 +4,7 @@
 
 var hotcrp_base, hotcrp_postvalue, hotcrp_paperid, hotcrp_suffix,
     hotcrp_list, hotcrp_urldefaults, hotcrp_status, hotcrp_user,
-    hotcrp_want_override_conflict;
+    hotcrp_want_override_conflict, hotcrp_absolute_base;
 
 function $$(id) {
     return document.getElementById(id);
@@ -68,13 +68,40 @@ function hoturl_post(page, options) {
     return hoturl(page, options);
 }
 
+function url_absolute(url, loc) {
+    var x = "", m;
+    loc = loc || window.location.href;
+    if (!/^\w+:\/\//.test(url)
+        && (m = loc.match(/^(\w+:)/)))
+        x = m[1];
+    if (x && !/^\/\//.test(url)
+        && (m = loc.match(/^\w+:(\/\/[^\/]+)/)))
+        x += m[1];
+    if (x && !/^\//.test(url)
+        && (m = loc.match(/^\w+:\/\/[^\/]+(\/[^?#]*)/))) {
+        x = (x + m[1]).replace(/\/[^\/]+$/, "/");
+        while (url.substring(0, 3) == "../") {
+            x = x.replace(/\/[^\/]*\/$/, "/");
+            url = url.substring(3);
+        }
+    }
+    return x + url;
+}
+
+function hoturl_absolute_base() {
+    if (!hotcrp_absolute_base)
+        hotcrp_absolute_base = url_absolute(hotcrp_base);
+    return hotcrp_absolute_base;
+}
+
+
 (function () {
     var old_onerror = window.onerror, nerrors_logged = 0;
     window.onerror = function (errormsg, url, lineno) {
         if (++nerrors_logged <= 10)
             jQuery.ajax({
-                url: hoturl("deadlines", "jserror=1&ajax=1"),
-                type: "POST",
+                url: hoturl("api", "jserror=1"),
+                type: "POST", cache: false,
                 data: {"error": errormsg, "url": url, "lineno": lineno}
             });
         return old_onerror ? old_onerror.apply(this, arguments) : false;
@@ -230,18 +257,13 @@ function text_to_html(text) {
     return n.innerHTML;
 }
 
+
 window.hotcrp_deadlines = (function () {
-var dl, dlname, dltime, has_tracker, had_tracker_at,
-    redisplay_timeout, reload_timeout, tracker_timer,
-    tracker_comet_at, tracker_comet_stop_until, tracker_comet_errors = 0;
+var dl, dlname, dltime, reload_timeout, redisplay_timeout;
 
-function redisplay_main() {
-    redisplay_timeout = null;
-    display_main();
-}
-
-// this logic is repeated in the back end
+// deadline display
 function display_main(is_initial) {
+    // this logic is repeated in the back end
     var s = "", amt, what = null, x, subtype,
         browser_now = (new Date).getTime() / 1000,
         time_since_load = browser_now - +dl.load,
@@ -309,11 +331,20 @@ function display_main(is_initial) {
     }
 }
 
+function redisplay_main() {
+    redisplay_timeout = null;
+    display_main();
+}
+
+
+// tracker
+var has_tracker, had_tracker_at, tracker_timer;
+
 function window_trackerstate() {
     var trackerstate = null;
     if (window.sessionStorage) {
         trackerstate = sessionStorage.getItem("hotcrp_tracker");
-        trackerstate = trackerstate && JSON.parse(trackerstate);
+        trackerstate = trackerstate && jQuery.parseJSON(trackerstate);
     }
     return trackerstate;
 }
@@ -339,27 +370,25 @@ function tracker_paper_columns(idx, paper) {
     return t + x.join(" &nbsp;&#183;&nbsp; ") + '</td>';
 }
 
-function tracker_elapsed(now) {
-    var sec, min, t;
-    now /= 1000;
-    if (dl.tracker && dl.tracker.position_at) {
-        sec = Math.round(now - (dl.tracker.position_at + (dl.load - dl.now)));
-        if (sec >= 3600)
-            return sprintf("%d:%02d:%02d", sec / 3600, (sec / 60) % 60, sec % 60);
-        else
-            return sprintf("%d:%02d", sec / 60, sec % 60);
-    } else
-        return null;
-}
-
 function tracker_show_elapsed() {
-    var e = $$("trackerelapsed"), t;
-    if (e && (t = tracker_elapsed((new Date).getTime())))
-        e.innerHTML = t;
-    else {
-        clearInterval(tracker_timer);
+    if (tracker_timer) {
+        clearTimeout(tracker_timer);
         tracker_timer = null;
     }
+    if (!dl.tracker || !dl.tracker.position_at)
+        return;
+
+    var now = (new Date).getTime() / 1000;
+    var delta = now - (dl.tracker.position_at + dl.load - dl.now);
+    var s = Math.round(delta);
+    if (s >= 3600)
+        s = sprintf("%d:%02d:%02d", s/3600, (s/60) % 60, s % 60);
+    else
+        s = sprintf("%d:%02d", s/60, s % 60);
+    jQuery("#trackerelapsed").html(s);
+
+    tracker_timer = setTimeout(tracker_show_elapsed,
+                               1000 - (delta * 1000) % 1000);
 }
 
 function display_tracker() {
@@ -404,11 +433,8 @@ function display_tracker() {
 
     if (dl.is_admin)
         t += '<div style="float:right"><a class="btn btn-transparent" href="#" onclick="return hotcrp_deadlines.tracker(-1)" title="Stop meeting tracker">x</a></div>';
-    if ((i = tracker_elapsed(now))) {
-        t += '<div style="float:right" id="trackerelapsed">' + i + "</div>";
-        if (!tracker_timer)
-            tracker_timer = setInterval(tracker_show_elapsed, 1000);
-    }
+    if (dl.tracker && dl.tracker.position_at)
+        t += '<div style="float:right" id="trackerelapsed"></div>';
     if (!dl.tracker.papers || !dl.tracker.papers[0]) {
         t += "<a href=\"" + hotcrp_base + dl.tracker.url + "\">Discussion list</a>";
     } else {
@@ -419,53 +445,156 @@ function display_tracker() {
         t += "</tr></tbody></table>";
     }
     mne.innerHTML = "<div class=\"trackerholder\">" + t + "</div>";
+    if (dl.tracker && dl.tracker.position_at)
+        tracker_show_elapsed();
     mnspace.style.height = mne.offsetHeight + "px";
 
     has_tracker = true;
     had_tracker_at = now;
 }
 
-function reload() {
-    clearTimeout(reload_timeout);
-    reload_timeout = null;
-    Miniajax.get(hoturl("deadlines", "ajax=1"), hotcrp_deadlines, 10000);
+function tracker(start) {
+    var trackerstate, list = "";
+    if (start < 0)
+        Miniajax.post(hoturl_post("api", "track=stop"), load, 10000);
+    if (!window.sessionStorage || !window.JSON || start < 0)
+        return false;
+    trackerstate = window_trackerstate();
+    if (start && (!trackerstate || trackerstate[0] != hotcrp_base)) {
+        trackerstate = [hotcrp_base, Math.floor(Math.random() * 100000)];
+        sessionStorage.setItem("hotcrp_tracker", JSON.stringify(trackerstate));
+    } else if (trackerstate && trackerstate[0] != hotcrp_base)
+        trackerstate = null;
+    if (trackerstate) {
+        if (hotcrp_list)
+            list = hotcrp_list.num || hotcrp_list.id;
+        var req = trackerstate[1] + "%20" + encodeURIComponent(list);
+        if (hotcrp_paperid)
+            req += "%20" + encodeURIComponent(hotcrp_paperid);
+        Miniajax.post(hoturl_post("api", "track=" + req), load, 10000);
+    }
+    return false;
 }
 
-function run_comet() {
-    if (dl.tracker_poll && !dl.tracker_poll_corrected
-        && !/^(?:https?:|\/)/.test(dl.tracker_poll))
-        dl.tracker_poll = hotcrp_base + dl.tracker_poll;
-    if (dl.tracker_poll && !tracker_comet_at) {
-        tracker_comet_at = (new Date).getTime();
-        jQuery.ajax({
-            url: dl.tracker_poll,
-            timeout: 300000,
-            dataType: "json",
-            complete: function (xhr, status) {
-                var now = (new Date).getTime(), delta = now - tracker_comet_at;
-                tracker_comet_at = null;
-                // Assume errors after long delays are actually timeouts
-                // (Chrome shuts down long polls sometimes)
-                if (status == "error" && delta > 100000)
-                    status = "timeout";
-                if (status == "success" && xhr.status == 200) {
-                    tracker_comet_errors = tracker_comet_stop_until = 0;
-                    reload();
-                } else if (status == "timeout")
-                    run_comet();
-                else if (++tracker_comet_errors % 3)
-                    setTimeout(run_comet, 128 << Math.min(tracker_comet_errors, 12));
-                else {
-                    tracker_comet_stop_until = now + 10000 * Math.min(tracker_comet_errors, 60);
-                    reload();
-                }
-            }
-        });
+
+// Comet tracker
+var comet_sent_at, comet_stop_until, comet_nerrors = 0;
+var comet_store_timeout, comet_store_listen_key;
+var comet_store_owned_key, comet_store_refresh_interval;
+
+function comet_store_key() {
+    if (window.localStorage && dl.tracker_poll)
+        return "hotcrp-comet " + dl.tracker_poll;
+    else
+        return false;
+}
+
+function comet_store_check(now) {
+    var key = comet_store_key();
+    if (!key || comet_store_owned_key)
+        return false;
+    var value = localStorage.getItem(key);
+    if (value && (value = jQuery.parseJSON(value))
+        && value.update_at && value.update_at >= now - 10000) {
+        jQuery(window).on("storage", comet_store_listen);
+        comet_store_listen_key = key;
+        comet_store_timeout = setTimeout(comet_tracker, 5000);
+        return true;
+    } else
+        return false;
+}
+
+function comet_store_listen(e) {
+    var j, ee = e.originalEvent;
+    if (ee.key == comet_store_listen_key
+        && !(ee.newValue && (j = jQuery.parseJSON(ee.newValue))
+             && j.update_at && j.update_at >= (new Date).getTime() - 10000))
+        reload();
+}
+
+function comet_store_refresh() {
+    localStorage.setItem(comet_store_owned_key,
+                         JSON.stringify({update_at: (new Date).getTime()}));
+}
+
+function comet_store_cancel() {
+    if (comet_store_owned_key) {
+        localStorage.removeItem(comet_store_owned_key);
+        clearInterval(comet_store_refresh_interval);
+        comet_store_owned_key = comet_store_refresh_interval = null;
     }
 }
+jQuery(window).on("unload", comet_store_cancel);
 
-function hotcrp_deadlines(dlx, is_initial) {
-    var t;
+function comet_tracker() {
+    var at = (new Date).getTime();
+
+    // correct tracker_poll URL to be a full URL if necessary
+    if (dl.tracker_poll && !dl.tracker_poll_corrected
+        && !/^(?:https?:|\/)/.test(dl.tracker_poll)) {
+        dl.tracker_poll = url_absolute(dl.tracker_poll, hoturl_absolute_base());
+        dl.tracker_poll_corrected = true;
+    }
+
+    // kill storage listeners
+    if (comet_store_timeout) {
+        clearTimeout(comet_store_timeout);
+        comet_store_timeout = null;
+    }
+    if (comet_store_listen_key) {
+        jQuery(window).off("storage", comet_store_listen);
+        comet_store_listen_key = null;
+    }
+    if (comet_store_owned_key && comet_store_owned_key == comet_store_key())
+        comet_store_cancel();
+
+    // exit early if no tracker_poll or stopped
+    if (!dl.tracker_poll || (comet_stop_until && comet_stop_until < at))
+        return false;
+    if (comet_sent_at || comet_store_check(at))
+        return true;
+
+    // make the request
+    comet_sent_at = at;
+    if (window.localStorage && window.JSON) {
+        comet_store_owned_key = comet_store_key();
+        comet_store_refresh();
+        comet_store_refresh_interval = setInterval(comet_store_refresh, 5000);
+    }
+
+    function complete(xhr, status) {
+        var now = (new Date).getTime();
+        if (comet_sent_at != at)
+            return;
+        comet_sent_at = null;
+        // Assume errors after long delays are actually timeouts
+        // (Chrome shuts down long polls sometimes)
+        if (status == "error" && now - at > 100000)
+            status = "timeout";
+        if (status == "success" && xhr.status == 200) {
+            comet_nerrors = comet_stop_until = 0;
+            reload();
+        } else if (status == "timeout")
+            comet_tracker();
+        else if (++comet_nerrors % 3)
+            setTimeout(comet_tracker, 128 << Math.min(comet_nerrors, 12));
+        else {
+            comet_stop_until = now + 10000 * Math.min(comet_nerrors, 60);
+            reload();
+        }
+    }
+
+    jQuery.ajax({
+        url: dl.tracker_poll,
+        timeout: 300000, cache: false, dataType: "json",
+        complete: complete
+    });
+    return true;
+}
+
+
+// deadline loading
+function load(dlx, is_initial) {
     if (dlx)
         window.hotcrp_status = dl = dlx;
     if (!dl.load)
@@ -474,12 +603,11 @@ function hotcrp_deadlines(dlx, is_initial) {
     if (dl.tracker || has_tracker)
         display_tracker();
     if (!reload_timeout) {
+        var t;
         if (is_initial && $$("clock_drift_container"))
             t = 10;
-        else if (had_tracker_at && dl.tracker_poll
-                 && (!tracker_comet_stop_until
-                     || tracker_comet_stop_until >= (new Date).getTime()))
-            run_comet();
+        else if (had_tracker_at && comet_tracker())
+            /* skip */;
         else if (had_tracker_at && dl.load - had_tracker_at < 1200000)
             t = 10000;
         else if (dlname && (!dltime || dltime - dl.load <= 120))
@@ -493,36 +621,16 @@ function hotcrp_deadlines(dlx, is_initial) {
     }
 }
 
-hotcrp_deadlines.init = function (dlx) {
-    hotcrp_deadlines(dlx, true);
-};
+function reload() {
+    clearTimeout(reload_timeout);
+    reload_timeout = null;
+    Miniajax.get(hoturl("api", "deadlines=1"), load, 10000);
+}
 
-hotcrp_deadlines.tracker = function (start) {
-    var trackerstate, list = "";
-    if (start < 0)
-        Miniajax.post(hoturl_post("deadlines", "track=stop&ajax=1"),
-                      hotcrp_deadlines, 10000);
-    if (!window.sessionStorage || !window.JSON || start < 0)
-        return false;
-    trackerstate = window_trackerstate();
-    if (start && (!trackerstate || trackerstate[0] != hotcrp_base)) {
-        trackerstate = [hotcrp_base, Math.floor(Math.random() * 100000)];
-        sessionStorage.setItem("hotcrp_tracker", JSON.stringify(trackerstate));
-    } else if (trackerstate && trackerstate[0] != hotcrp_base)
-        trackerstate = null;
-    if (trackerstate) {
-        if (hotcrp_list)
-            list = hotcrp_list.num || hotcrp_list.id;
-        trackerstate = trackerstate[1] + "%20" + encodeURIComponent(list);
-        if (hotcrp_paperid)
-            trackerstate += "%20" + encodeURIComponent(hotcrp_paperid);
-        Miniajax.post(hoturl_post("deadlines", "track=" + trackerstate + "&ajax=1"),
-                      hotcrp_deadlines, 10000);
-    }
-    return false;
+return {
+    init: function (dlx) { load(dlx, true); },
+    tracker: tracker
 };
-
-return hotcrp_deadlines;
 })();
 
 
@@ -1241,7 +1349,7 @@ function fill_editing(hc, cj) {
 
 function activate_editing(j, cj) {
     var elt;
-    j.find("textarea").text(cj.text);
+    j.find("textarea").text(cj.text).autogrow();
     j.find("input[name=commenttags]").val((cj.tags || []).join(" "));
     if ((elt = j.find("input[name=visibility][value=" + (cj.visibility || "rev") + "]")[0]))
         elt.checked = true;
@@ -1670,7 +1778,7 @@ function rp_focus() {
 function rp_change() {
     var self = this, whichpaper = this.name.substr(7);
     jQuery.ajax({
-        type: "POST", url: prefurl,
+        url: prefurl, type: "POST", cache: false,
         data: {"ajax": 1, "p": whichpaper, "revpref": self.value},
         dataType: "json",
         success: function (rv) {
@@ -2538,7 +2646,7 @@ function check_version(url, versionstr) {
         }
     }
     function updatecb(json) {
-        if (json && json.updates && JSON.stringify)
+        if (json && json.updates && window.JSON && JSON.stringify)
             Miniajax.get(hotcrp_base + "checkupdates.php?data="
                          + encodeURIComponent(JSON.stringify(json)),
                          updateverifycb);
@@ -2550,7 +2658,7 @@ function check_version(url, versionstr) {
     try {
         if (window.localStorage
             && localStorage.hotcrp_version_check
-            && (x = JSON.parse(localStorage.hotcrp_version_check))
+            && (x = jQuery.parseJSON(localStorage.hotcrp_version_check))
             && x.at >= (new Date).getTime() - 600000 /* 10 minutes */
             && x.version == versionstr)
             return;

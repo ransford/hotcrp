@@ -121,6 +121,8 @@ class Contact {
             $this->has_review_ = $user->has_review;
         if (isset($user->has_outstanding_review))
             $this->has_outstanding_review_ = $user->has_outstanding_review;
+        if (isset($user->is_site_contact))
+            $this->is_site_contact = $user->is_site_contact;
     }
 
     // begin changing contactId to cid
@@ -177,9 +179,12 @@ class Contact {
                 $Opt["contactEmail"] = $row->email;
             }
         }
-        return (object) array("fullName" => $Opt["contactName"],
-                              "email" => $Opt["contactEmail"],
-                              "privChair" => 1, "is_site_contact" => 1);
+        return new Contact((object) array("fullName" => $Opt["contactName"],
+                                          "email" => $Opt["contactEmail"],
+                                          "isChair" => true,
+                                          "isPC" => true,
+                                          "is_site_contact" => true,
+                                          "contactTags" => null));
     }
 
     private function assign_roles($roles) {
@@ -378,6 +383,15 @@ class Contact {
         return !!$this->email;
     }
 
+    static function is_anonymous_email($email) {
+        // see also PaperSearch, Mailer
+        return preg_match('/\Aanonymous\d*\z/', $email);
+    }
+
+    function is_anonymous_user() {
+        return $this->email && self::is_anonymous_email($this->email);
+    }
+
     function has_database_account() {
         return $this->contactId > 0;
     }
@@ -421,6 +435,7 @@ class Contact {
         global $Conf;
 
         // Load from database
+        $result = null;
         if ($this->contactId > 0) {
             $qr = "";
             if ($this->review_tokens_)
@@ -432,9 +447,8 @@ class Contact {
                 left join PaperConflict conf on (conf.contactId=c.contactId)
                 left join PaperReview r on (r.contactId=c.contactId$qr)
                 where c.contactId=$this->contactId group by c.contactId");
-            $row = edb_row($result);
-        } else
-            $row = null;
+        }
+        $row = edb_row($result);
         $this->is_author_ = $row && $row[0] >= CONFLICT_AUTHOR;
         $this->has_review_ = $row && $row[1] > 0;
         $this->has_outstanding_review_ = $row && $row[2] > 0;
@@ -482,8 +496,9 @@ class Contact {
     function is_requester() {
         global $Conf;
         if (!isset($this->is_requester_)) {
-            $result = $Conf->qe("select epr.requestedBy from PaperReview epr
-                where epr.requestedBy=$this->contactId limit 1");
+            $result = null;
+            if ($this->contactId > 0)
+                $result = Dbl::qe("select requestedBy from PaperReview where requestedBy=? and contactId!=? limit 1", $this->contactId, $this->contactId);
             $row = edb_row($result);
             $this->is_requester_ = $row && $row[0] > 1;
         }
@@ -493,7 +508,9 @@ class Contact {
     function is_discussion_lead() {
         global $Conf;
         if (!isset($this->is_lead_)) {
-            $result = $Conf->qe("select paperId from Paper where leadContactId=$this->contactId limit 1");
+            $result = null;
+            if ($this->contactId > 0)
+                $result = $Conf->qe("select paperId from Paper where leadContactId=$this->contactId limit 1");
             $this->is_lead_ = edb_nrows($result) > 0;
         }
         return $this->is_lead_;
@@ -502,7 +519,9 @@ class Contact {
     function is_manager() {
         global $Conf;
         if (!isset($this->is_manager_)) {
-            $result = $Conf->qe("select paperId from Paper where managerContactId=$this->contactId limit 1");
+            $result = null;
+            if ($this->contactId > 0)
+                $result = $Conf->qe("select paperId from Paper where managerContactId=$this->contactId limit 1");
             $this->is_manager_ = edb_nrows($result) > 0;
         }
         return $this->is_manager_;
@@ -563,6 +582,19 @@ class Contact {
 
     function review_tokens() {
         return $this->review_tokens_ ? $this->review_tokens_ : array();
+    }
+
+    function review_token_cid($prow, $rrow = null) {
+        if (!$this->review_tokens_)
+            return null;
+        if (!$rrow) {
+            $ci = $prow->contact_info($this);
+            return $ci->review_token_cid;
+        } else if ($rrow->reviewToken
+                   && array_search($rrow->reviewToken, $this->review_tokens_) !== false)
+            return (int) $rrow->contactId;
+        else
+            return null;
     }
 
     function change_review_token($token, $on) {
@@ -1449,8 +1481,11 @@ class Contact {
         else if (isset($rrow->contactId))
             $rrow_contactId = $rrow->contactId;
         return $rrow_contactId == $this->contactId
-            || ($this->review_tokens_ && array_search($rrow->reviewToken, $this->review_tokens_) !== false)
-            || ($rrow->requestedBy == $this->contactId && $rrow->reviewType == REVIEW_EXTERNAL && $Conf->setting("pcrev_editdelegate"));
+            || ($this->review_tokens_
+                && array_search($rrow->reviewToken, $this->review_tokens_) !== false)
+            || ($rrow->requestedBy == $this->contactId
+                && $rrow->reviewType == REVIEW_EXTERNAL
+                && $Conf->setting("pcrev_editdelegate"));
     }
 
     public function canCountReview($prow, $rrow, $forceShow) {
@@ -1744,6 +1779,8 @@ class Contact {
                     && (!$submit || self::override_deadlines())))
             && (!$crow
                 || $crow->contactId == $this->contactId
+                || ($crow->contactId == $rights->review_token_cid
+                    && $rights->review_token_cid)
                 || $rights->allow_administer))
             return true;
         // collect failure reasons
@@ -1792,6 +1829,8 @@ class Contact {
         $rights = $this->rights($prow, $forceShow);
         // policy
         if ($crow_contactId == $this->contactId        // wrote this comment
+            || ($crow_contactId == $rights->review_token_cid
+                && $rights->review_token_cid)
             || $rights->can_administer
             || ($rights->act_author_view
                 && $ctype >= COMMENTTYPE_AUTHOR
@@ -2018,15 +2057,17 @@ class Contact {
 
     function my_rounds() {
         global $Conf;
+        $rounds = array();
         $where = array();
         if ($this->contactId)
             $where[] = "contactId=" . $this->contactId;
         if (($tokens = $this->review_tokens()))
             $where[] = "reviewToken in (" . join(",", $tokens) . ")";
-        $result = $Conf->qe("select distinct reviewRound from PaperReview where " . join(" or ", $where));
-        $rounds = array();
-        while (($row = edb_row($result)))
-            $rounds[] = +$row[0];
+        if (count($where)) {
+            $result = $Conf->qe("select distinct reviewRound from PaperReview where " . join(" or ", $where));
+            while (($row = edb_row($result)))
+                $rounds[] = +$row[0];
+        }
         sort($rounds);
         return $rounds;
     }
@@ -2413,8 +2454,11 @@ class Contact {
 
         if ($q[0] == "i")
             $Conf->ql("delete from PaperReviewRefused where paperId=$pid and contactId=$reviewer_cid");
+        // Mark rev_tokens setting for future update by
+        // updateRevTokensSetting
         if ($rrow && @$rrow->reviewToken && $type <= 0)
             $Conf->settings["rev_tokens"] = -1;
+        // Set pcrev_assigntime
         if ($q[0] == "i" && $type >= REVIEW_PC && $Conf->setting("pcrev_assigntime", 0) < $Now)
             $Conf->save_setting("pcrev_assigntime", $Now);
         return $reviewId;
@@ -2461,7 +2505,7 @@ class Contact {
         global $Conf, $Now;
         if (!$this->activity_at || $this->activity_at < $Now) {
             $this->activity_at = $Now;
-            if ($this->contactId)
+            if ($this->contactId && !$this->is_anonymous_user())
                 Dbl::ql("update ContactInfo set lastLogin=$Now where contactId=$this->contactId");
             if ($this->contactDbId)
                 Dbl::ql(self::contactdb(), "update ContactInfo set activity_at=$Now where contactDbId=$this->contactDbId");
@@ -2471,13 +2515,15 @@ class Contact {
     function log_activity($text, $paperId = null) {
         global $Conf;
         $this->mark_activity();
-        $Conf->log($text, $this, $paperId);
+        if (!$this->is_anonymous_user())
+            $Conf->log($text, $this, $paperId);
     }
 
     function log_activity_for($user, $text, $paperId = null) {
         global $Conf;
         $this->mark_activity();
-        $Conf->log($text . " by $this->email", $user, $paperId);
+        if (!$this->is_anonymous_user())
+            $Conf->log($text . " by $this->email", $user, $paperId);
     }
 
 }

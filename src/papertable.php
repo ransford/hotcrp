@@ -1208,19 +1208,19 @@ class PaperTable {
     }
 
     private function papstripPCConflicts() {
-        global $Conf;
+        global $Conf, $Me;
         assert(!$this->editable);
         if (!$this->prow)
             return;
 
         $pcconf = array();
         $pcm = pcMembers();
-        $tagger = new Tagger;
         foreach ($this->prow->pc_conflicts() as $id => $x) {
             $p = $pcm[$id];
             $text = "<p class=\"odname\">" . Text::name_html($p) . "</p>";
-            if (($tags = $tagger->color_classes($p->contactTags)))
-                $text = "<div class=\"pscopen $tags\">$text</div>";
+            if ($Me->isPC && $p->contactTags
+                && ($classes = TagInfo::color_classes($p->contactTags)))
+                $text = "<div class=\"pscopen $classes\">$text</div>";
             $pcconf[$p->sort_position] = $text;
         }
 
@@ -1293,21 +1293,24 @@ class PaperTable {
         if ($site || $tags !== "") {
             // Note that tags MUST NOT contain HTML special characters.
             $tagger = new Tagger;
-            $tx = $tagger->unparse_link_viewable($tags, false, !$this->prow->has_conflict($Me));
-            $editable = $site && $Me->canSetTags($this->prow);
-            $unfolded = $editable && (isset($Error["tags"]) || defval($_REQUEST, "atab") == "tags");
+            $viewable = $tagger->viewable($tags);
+
+            $tx = $tagger->unparse_and_link($viewable, $tags, false,
+                                            !$this->prow->has_conflict($Me));
+            $is_editable = $site && $Me->canSetTags($this->prow);
+            $unfolded = $is_editable && (isset($Error["tags"]) || defval($_REQUEST, "atab") == "tags");
 
             echo $this->_papstripBegin("tags", !$unfolded,
                                        array("onunfold" => "Miniajax.submit(\"tagreportform\")"));
-            $color = $tagger->color_classes($tags);
+            $color = TagInfo::color_classes($viewable);
             echo "<div class=\"", trim("pscopen $color"), "\">";
 
-            if ($editable)
+            if ($is_editable)
                 echo Ht::form_div(hoturl_post($site, "p=" . $this->prow->paperId), array("id" => "tagform", "onsubmit" => "return save_tags()"));
 
-            echo $this->papt("tags", "Tags", array("type" => "ps", "editfolder" => ($editable ? "tags" : 0))),
+            echo $this->papt("tags", "Tags", array("type" => "ps", "editfolder" => ($is_editable ? "tags" : 0))),
                 "<div class='psv' style='position:relative'>";
-            if ($editable) {
+            if ($is_editable) {
                 // tag report form
                 $Conf->footerHtml(Ht::form(hoturl_post("paper", "p=" . $this->prow->paperId . "&amp;tagreport=1"), array("id" => "tagreportform", "onsubmit" => "return Miniajax.submit('tagreportform')"))
                                   . "</form>");
@@ -1319,10 +1322,13 @@ class PaperTable {
                 echo "</div>";
                 if (isset($Error["tags"]))
                     echo "<div class='xmerror'>", $Error["tags"], "</div>";
+                $editable = $tags;
+                if ($this->prow)
+                    $editable = $tagger->paper_editable($this->prow);
                 echo "<div style='position:relative'>",
                     "<div id='taghelp_p' class='taghelp_p'></div>",
                     "<textarea id='foldtags_d' cols='20' rows='4' name='tags' onkeypress='return crpSubmitKeyFilter(this, event)'>",
-                    $tagger->unparse($tagger->editable($tags)),
+                    $tagger->unparse($editable),
                     "</textarea></div>",
                     "<div style='padding:1ex 0;text-align:right'>",
                     Ht::hidden("settags", "1"),
@@ -1336,7 +1342,7 @@ class PaperTable {
                 echo ($tx == "" ? "None" : $tx);
             echo "</div>";
 
-            if ($editable)
+            if ($is_editable)
                 echo "</div></form>";
             echo "</div></div>\n";
         }
