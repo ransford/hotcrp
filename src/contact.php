@@ -14,7 +14,7 @@ class Contact {
     var $email = "";
     var $preferredEmail = "";
     var $sorter = "";
-    var $affiliation;
+    var $affiliation = "";
     var $collaborators;
     var $voicePhoneNumber;
     var $password = "";
@@ -72,12 +72,21 @@ class Contact {
 
     private function merge($user) {
         global $Conf;
-        if (isset($user->contactId)
-            && (!isset($user->dsn) || $user->dsn === $Conf->dsn))
-            $this->contactId = (int) $user->contactId;
+        if (!isset($user->dsn) || $user->dsn == $Conf->dsn) {
+            if (isset($user->contactId))
+                $this->contactId = $this->cid = (int) $user->contactId;
+            //else if (isset($user->cid))
+            //    $this->contactId = $this->cid = (int) $user->cid;
+        }
         if (isset($user->contactDbId))
             $this->contactDbId = (int) $user->contactDbId;
-        foreach (array("firstName", "lastName", "email", "preferredEmail", "affiliation",
+        if (isset($user->firstName) && isset($user->lastName))
+            $name = $user;
+        else
+            $name = Text::analyze_name($user);
+        $this->firstName = (string) @$name->firstName;
+        $this->lastName = (string) @$name->lastName;
+        foreach (array("email", "preferredEmail", "affiliation",
                        "voicePhoneNumber", "addressLine1", "addressLine2",
                        "city", "state", "zipCode", "country") as $k)
             if (isset($user->$k))
@@ -135,7 +144,7 @@ class Contact {
 
     public function __set($name, $value) {
         if ($name == "cid")
-            $this->contactId = $value;
+            $this->contactId = $this->cid = $value;
         else
             $this->$name = $value;
     }
@@ -676,6 +685,7 @@ class Contact {
 
     private function trim() {
         $this->contactId = (int) trim($this->contactId);
+        $this->cid = $this->contactId;
         $this->firstName = simplify_whitespace($this->firstName);
         $this->lastName = simplify_whitespace($this->lastName);
         foreach (array("email", "preferredEmail", "affiliation",
@@ -717,27 +727,26 @@ class Contact {
         global $Conf, $Now, $Opt;
         $this->trim();
         $inserting = !$this->contactId;
-        $qf = array();
+        $qf = $qv = array();
         foreach (array("firstName", "lastName", "email", "affiliation",
                        "voicePhoneNumber", "password", "collaborators",
-                       "roles", "defaultWatch", "passwordTime") as $k)
-            $qf[] = "$k='" . sqlq($this->$k) . "'";
-        if ($this->preferredEmail != "")
-            $qf[] = "preferredEmail='" . sqlq($this->preferredEmail) . "'";
-        else
-            $qf[] = "preferredEmail=null";
-        if ($this->contactTags)
-            $qf[] = "contactTags='" . sqlq($this->contactTags) . "'";
-        else
-            $qf[] = "contactTags=null";
+                       "roles", "defaultWatch", "passwordTime") as $k) {
+            $qf[] = "$k=?";
+            $qv[] = $this->$k;
+        }
+        $qf[] = "preferredEmail=?";
+        $qv[] = $this->preferredEmail != "" ? $this->preferredEmail : null;
+        $qf[] = "contactTags=?";
+        $qv[] = $this->contactTags ? : null;
         $qf[] = "disabled=" . ($this->disabled ? 1 : 0);
         if ($Conf->sversion >= 71) {
-            if (!$this->data_)
-                $qf[] = "data=NULL";
-            else if (is_string($this->data_))
-                $qf[] = "data='" . sqlq($this->data_) . "'";
+            $qf[] = "data=?";
+            if (!$this->data_ || is_string($this->data_))
+                $qv[] = $this->data_ ? : null;
             else if (is_object($this->data_))
-                $qf[] = "data='" . sqlq(json_encode($this->data_)) . "'";
+                $qv[] = json_encode($this->data_);
+            else
+                $qv[] = null;
         }
         $q = ($inserting ? "insert into" : "update")
             . " ContactInfo set " . join(", ", $qf);
@@ -746,22 +755,21 @@ class Contact {
             $q .= ", creationTime=$Now";
         } else
             $q .= " where contactId=" . $this->contactId;
-        $result = Dbl::real_qe($Conf->dblink, $q);
+        $result = Dbl::qe($Conf->dblink, $q, $qv);
         if (!$result)
             return $result;
         if ($inserting)
-            $this->contactId = $result->insert_id;
+            $this->contactId = $this->cid = $result->insert_id;
         $Conf->ql("delete from ContactAddress where contactId=$this->contactId");
         if ($this->addressLine1 || $this->addressLine2 || $this->city
-            || $this->state || $this->zipCode || $this->country) {
-            $query = "insert into ContactAddress (contactId, addressLine1, addressLine2, city, state, zipCode, country) values ($this->contactId, '" . sqlq($this->addressLine1) . "', '" . sqlq($this->addressLine2) . "', '" . sqlq($this->city) . "', '" . sqlq($this->state) . "', '" . sqlq($this->zipCode) . "', '" . sqlq($this->country) . "')";
-            $result = $Conf->qe($query);
-        }
+            || $this->state || $this->zipCode || $this->country)
+            $result = Dbl::qe($Conf->dblink, "insert into ContactAddress set contactId=?, addressLine1=?, addressLine2=?, city=?, state=?, zipCode=?, country=?",
+                              $this->contactId, $this->addressLine1, $this->addressLine2, $this->city, $this->state, $this->zipCode, $this->country);
 
         // add to contact database
         if (@$Opt["contactdb_dsn"] && ($cdb = self::contactdb())) {
             Dbl::ql($cdb, "insert into ContactInfo set firstName=?, lastName=?, email=?, affiliation=? on duplicate key update firstName=values(firstName), lastName=values(lastName), affiliation=values(affiliation)",
-                   $this->firstName, $this->lastName, $this->email, $this->affiliation);
+                    $this->firstName, $this->lastName, $this->email, $this->affiliation);
             if ($this->password_plaintext
                 && ($cdb_user = self::contactdb_find_by_email($this->email))
                 && !$cdb_user->password
@@ -909,15 +917,15 @@ class Contact {
         $best_email = @$reg->preferredEmail ? $reg->preferredEmail : $email;
         $authored_papers = Contact::email_authored_papers($best_email, $reg);
 
-        // Set up query
-        $qa = "email, password, creationTime";
-        $qb = "'" . sqlq($email) . "','" . sqlq($this->password) . "',$Now";
+        // Insert
+        $qf = array("email=?, password=?, creationTime=$Now");
+        $qv = array($email, $this->password);
         foreach ($reg_keys as $k)
             if (isset($reg->$k)) {
-                $qa .= ",$k";
-                $qb .= ",'" . sqlq($reg->$k) . "'";
+                $qf[] = "$k=?";
+                $qv[] = $reg->$k;
             }
-        $result = Dbl::real_ql("insert into ContactInfo ($qa) values ($qb)");
+        $result = Dbl::ql("insert into ContactInfo set " . join(", ", $qf), $qv);
         if (!$result)
             return false;
         $cid = (int) $result->insert_id;
@@ -985,15 +993,13 @@ class Contact {
     }
 
     static function id_by_email($email) {
-        global $Conf;
-        $result = $Conf->qe("select contactId from ContactInfo where email='" . sqlq(trim($email)) . "'");
+        $result = Dbl::qe("select contactId from ContactInfo where email=?", trim($email));
         $row = edb_row($result);
         return $row ? $row[0] : false;
     }
 
     static function email_by_id($id) {
-        global $Conf;
-        $result = $Conf->qe("select email from ContactInfo where contactId=" . (int) $id);
+        $result = Dbl::qe("select email from ContactInfo where contactId=" . (int) $id);
         $row = edb_row($result);
         return $row ? $row[0] : false;
     }
@@ -1758,9 +1764,6 @@ class Contact {
 
     function canComment($prow, $crow, &$whyNot = null, $submit = false) {
         global $Conf;
-        // load comment type
-        if ($crow && !isset($crow->commentType))
-            setCommentType($crow);
         // check whether this is a response
         if ($crow && ($crow->commentType & COMMENTTYPE_RESPONSE))
             return $this->canRespond($prow, $crow, $whyNot, $submit);
@@ -1815,8 +1818,6 @@ class Contact {
         // fetch paper
         if (!($prow = $this->_fetchPaperRow($prow, $whyNot)))
             return false;
-        if ($crow && !isset($crow->commentType))
-            setCommentType($crow);
         $ctype = $crow ? $crow->commentType : COMMENTTYPE_AUTHOR;
         $crow_contactId = 0;
         if ($crow && isset($crow->commentContactId))
@@ -1957,8 +1958,6 @@ class Contact {
 
     function canViewCommentIdentity($prow, $crow, $forceShow) {
         global $Conf;
-        if ($crow && !isset($crow->commentType))
-            setCommentType($crow);
         if ($crow->commentType & COMMENTTYPE_RESPONSE)
             return $this->can_view_authors($prow, $forceShow);
         $crow_contactId = 0;
@@ -2438,7 +2437,7 @@ class Contact {
         else
             return $rrow ? $rrow->reviewId : 0;
 
-        if (!($result = Dbl::real_qe($q)))
+        if (!($result = Dbl::raw_qe($q)))
             return false;
 
         if ($q[0] == "d") {
@@ -2491,7 +2490,7 @@ class Contact {
         // log, update settings
         if ($result && $result->affected_rows) {
             $this->log_activity_for($revcid, "Set $type", $px);
-            if ($type == "lead" && !$revcid != !$Conf->setting("paperlead"))
+            if (($type == "lead" || $type == "shepherd") && !$revcid != !$Conf->setting("paperlead"))
                 $Conf->update_paperlead_setting();
             if ($type == "manager" && !$revcid != !$Conf->setting("papermanager"))
                 $Conf->update_papermanager_setting();

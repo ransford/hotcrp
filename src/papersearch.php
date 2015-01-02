@@ -269,7 +269,8 @@ class PaperSearch {
     private $contact_match = array();
     private $noratings = false;
     private $interestingRatings = array();
-    private $needflags;
+    private $needflags = 0;
+    private $_query_options = array();
     private $reviewAdjust = false;
     private $_reviewAdjustError = false;
     private $_thenError = false;
@@ -278,10 +279,9 @@ class PaperSearch {
     var $headingmap = null;
     var $viewmap;
 
-    private $_matchTable = null;
+    private $_matches = null;
 
     static private $_sort_keywords = null;
-    static private $_table_number = 0;
 
     static private $_keywords = array("ti" => "ti", "title" => "ti",
         "ab" => "ab", "abstract" => "ab",
@@ -328,6 +328,7 @@ class PaperSearch {
         "revpref" => "revpref", "pref" => "revpref",
         "repref" => "revpref",
         "ss" => "ss", "search" => "ss",
+        "formula" => "formula", "f" => "formula",
         "HEADING" => "HEADING", "heading" => "HEADING",
         "show" => "show", "VIEW" => "show", "view" => "show",
         "hide" => "hide", "edit" => "edit",
@@ -431,12 +432,6 @@ class PaperSearch {
 
         $this->_reviewer = defval($opt, "reviewer", false);
         $this->_reviewer_fixed = !!$this->_reviewer;
-    }
-
-    function __destruct() {
-        global $Conf;
-        if ($this->_matchTable)
-            $Conf->q("drop temporary table $this->_matchTable");
     }
 
     // begin changing contactId to cid
@@ -709,7 +704,6 @@ class PaperSearch {
     }
 
     function _searchReviewerConflict($word, &$qt, $quoted) {
-        global $Conf;
         $args = array();
         while (preg_match('/\A\s*#?(\d+)(?:-#?(\d+))?\s*,?\s*(.*)\z/s', $word, $m)) {
             $m[2] = (isset($m[2]) && $m[2] ? $m[2] : $m[1]);
@@ -721,7 +715,7 @@ class PaperSearch {
             $this->warn("The <code>reconflict</code> keyword expects a list of paper numbers.");
             $qt[] = new SearchTerm("f");
         } else {
-            $result = $Conf->qe("select distinct contactId from PaperReview where paperId in (" . join(", ", array_keys($args)) . ")");
+            $result = Dbl::qe("select distinct contactId from PaperReview where paperId in (" . join(", ", array_keys($args)) . ")");
             $contacts = array();
             while (($row = edb_row($result)))
                 $contacts[] = $row[0];
@@ -893,6 +887,21 @@ class PaperSearch {
         // this restriction below in clauseTermSetRevpref.
         $value = new SearchReviewValue($mx[0], $contacts, join(" and ", array_slice($mx, 1)));
         $qt[] = new SearchTerm("revpref", $this->privChair ? 0 : self::F_NONCONFLICT, $value);
+    }
+
+    private function _search_formula($word, &$qt, $quoted) {
+        if (preg_match('/\A[^(){}\[\]]+\z/', $word) && !$quoted
+            && ($result = Dbl::qe("select * from Formula where name=?", $word))
+            && ($row = $result->fetch_object()))
+            $formula = new Formula($row);
+        else
+            $formula = new Formula($word);
+        if ($formula->check())
+            $qt[] = new SearchTerm("formula", self::F_XVIEW, $formula);
+        else {
+            $this->warn($formula->error_html());
+            $qt[] = new SearchTerm("f");
+        }
     }
 
     private function _check_tag($tagword, $allow_star) {
@@ -1382,6 +1391,8 @@ class PaperSearch {
             $this->_searchReviewRatings($word, $qt);
         if ($keyword ? $keyword == "has" : isset($this->fields["has"]))
             $this->_searchHas($word, $qt, $quoted);
+        if ($keyword == "formula")
+            $this->_search_formula($word, $qt, $quoted);
         if ($keyword ? $keyword == "ss" : isset($this->fields["ss"])) {
             if (($nextq = self::_expand_saved_search($word, $this->_ssRecursion))) {
                 $this->_ssRecursion[$word] = true;
@@ -1470,13 +1481,12 @@ class PaperSearch {
         }
 
         // "show:" may be followed by a parenthesized expression
-        $keyword = ($colon !== false ? substr($word, $colon) : "");
-        if (substr($str, 0, 1) === "(" && $colon !== false
-            && ($keyword = substr($word, 0, $colon)) !== ""
-            && ($keyword = @self::$_keywords[$keyword])
+        $keyword = ($colon !== false ? substr($word, 0, $colon) : "");
+        $keyword = @self::$_keywords[$keyword];
+        if (substr($str, 0, 1) === "(" && $keyword
             && substr($word, $colon + 1, 1) !== "\""
             && ($keyword === "show" || $keyword === "showsort"
-                || $keyword === "sort")) {
+                || $keyword === "sort" || $keyword === "formula")) {
             $pos = self::find_end_balanced_parens($str);
             $word .= substr($str, 0, $pos);
             $str = substr($str, $pos);
@@ -1982,9 +1992,9 @@ class PaperSearch {
         $q = array();
         $this->_clauseTermSetFlags($t, $sqi, $q);
 
-        if ($value == "none" && !$compar)
+        if ($value === "none" && !$compar)
             list($compar, $value) = array("=0", "");
-        else if (($value == "" || $value == "any") && !$compar)
+        else if (($value === "" || $value === "any") && !$compar)
             list($compar, $value) = array(">0", "");
         else if (!$compar || $compar == ">=1")
             $compar = ">0";
@@ -2259,6 +2269,13 @@ class PaperSearch {
             $t->link = $thistab . "_x";
             $q[] = $sqi->columns[$t->link];
             $f[] = "(" . join(" and ", $q) . ")";
+        } else if ($tt == "formula") {
+            $q = array("true");
+            $this->_clauseTermSetFlags($t, $sqi, $q);
+            $t->value->add_query_options($this->_query_options, $this->contact);
+            if (!$t->link)
+                $t->link = $t->value->compile_function($this->contact);
+            $f[] = "(" . join(" and ", $q) . ")";
         } else if ($tt == "not") {
             $ff = array();
             $sqi->negated = !$sqi->negated;
@@ -2292,7 +2309,7 @@ class PaperSearch {
     // Check the results of the query, reducing the possibly conservative
     // overestimate produced by the database to a precise result.
 
-    private function _clauseTermCheckFlags($t, &$row) {
+    private function _clauseTermCheckFlags($t, $row) {
         $flags = $t->flags;
         if (($flags & self::F_AUTHOR)
             && !$this->contact->actAuthorView($row))
@@ -2363,7 +2380,7 @@ class PaperSearch {
         return true;
     }
 
-    function _clauseTermCheckField(&$t, &$row) {
+    function _clauseTermCheckField($t, $row) {
         $field = $t->link;
         if (!$this->_clauseTermCheckFlags($t, $row)
             || $row->$field == "")
@@ -2388,14 +2405,18 @@ class PaperSearch {
             return !!preg_match('{' . $t->preg_raw . '}i', $row->$field);
     }
 
-    function _clauseTermCheck(&$t, &$row) {
+    function _clauseTermCheck($t, $row) {
         $tt = $t->type;
 
         // collect columns
         if ($tt == "ti" || $tt == "ab" || $tt == "au" || $tt == "co")
             return $this->_clauseTermCheckField($t, $row);
-        else if ($tt == "re" || $tt == "conflict" || $tt == "revpref"
-                 || $tt == "cmt" || $tt == "cmttag") {
+        else if ($tt == "au_cid") {
+            assert(is_array($t->value));
+            return $this->_clauseTermCheckFlags($t, $row)
+                && $row->{$t->link} != 0;
+        } else if ($tt == "re" || $tt == "conflict" || $tt == "revpref"
+                   || $tt == "cmt" || $tt == "cmttag") {
             if (!$this->_clauseTermCheckFlags($t, $row))
                 return false;
             else {
@@ -2448,6 +2469,9 @@ class PaperSearch {
                 else
                     return $row->$fieldname != 0;
             }
+        } else if ($tt == "formula") {
+            $formulaf = $t->link;
+            return !!$formulaf($row, $this->contact);
         } else if ($tt == "not") {
             return !$this->_clauseTermCheck($t->value, $row);
         } else if ($tt == "and" || $tt == "and2") {
@@ -2462,10 +2486,12 @@ class PaperSearch {
             return false;
         } else if ($tt == "f")
             return false;
-        else if ($tt == "t")
+        else if ($tt == "t" || $tt == "float" || $tt == "revadj")
             return true;
-        else
+        else {
+            error_log("PaperSearch::_clauseTermCheck: $tt defaults, correctness unlikely");
             return true;
+        }
     }
 
 
@@ -2473,17 +2499,13 @@ class PaperSearch {
 
     function _search() {
         global $Conf;
-        if ($this->_matchTable === false)
+        if ($this->_matches === false)
             return false;
-        assert($this->_matchTable === null);
-        $this->_matchTable = "PaperMatches_" . self::$_table_number;
-        ++self::$_table_number;
+        assert($this->_matches === null);
 
         if ($this->limitName == "x") {
-            if (!$Conf->qe("create temporary table $this->_matchTable select Paper.paperId from Paper where false"))
-                return ($this->_matchTable = false);
-            else
-                return true;
+            $this->_matches = array();
+            return true;
         }
 
         // parse and clean the query
@@ -2517,7 +2539,6 @@ class PaperSearch {
         $sqi->add_column("timeWithdrawn", "Paper.timeWithdrawn");
         $sqi->add_column("outcome", "Paper.outcome");
         $filters = array();
-        $this->needflags = 0;
         $this->_clauseTermSet($qe, $sqi, $filters);
         //$Conf->infoMsg(Ht::pre_text(var_export($filters, true)));
 
@@ -2644,7 +2665,7 @@ class PaperSearch {
         $q = "select ";
         foreach ($sqi->columns as $colname => $value)
             $q .= $value . " " . $colname . ", ";
-        $q = substr($q, 0, strlen($q) - 2) . " from ";
+        $q = substr($q, 0, strlen($q) - 2) . "\n    from ";
         foreach ($sqi->tables as $tabname => $value)
             if (!$value)
                 $q .= $tabname;
@@ -2652,12 +2673,12 @@ class PaperSearch {
                 $joiners = array("$tabname.paperId=Paper.paperId");
                 for ($i = 2; $i < count($value); ++$i)
                     $joiners[] = $value[$i];
-                $q .= " " . $value[0] . " " . $value[1] . " as " . $tabname
-                    . " on (" . join(" and ", $joiners) . ")";
+                $q .= "\n    " . $value[0] . " " . $value[1] . " as " . $tabname
+                    . " on (" . join("\n        and ", $joiners) . ")";
             }
         if (count($filters))
-            $q .= " where " . join(" and ", $filters);
-        $q .= " group by Paper.paperId";
+            $q .= "\n    where " . join("\n        and ", $filters);
+        $q .= "\n    group by Paper.paperId";
 
         // clean up contact matches
         if (count($this->contact_match))
@@ -2666,15 +2687,16 @@ class PaperSearch {
         //$Conf->infoMsg(Ht::pre_text_wrap($q));
 
         // actually perform query
-        if (!$Conf->qe("create temporary table $this->_matchTable $q"))
-            return ($this->_matchTable = false);
+        $result = Dbl::raw_qe($q);
+        if (!$result)
+            return ($this->_matches = false);
+        $this->_matches = array();
 
         // correct query, create thenmap and headingmap
         $this->thenmap = ($qe->type == "then" ? array() : null);
         $this->headingmap = array();
         if ($need_filter) {
             $delete = array();
-            $result = $Conf->qe("select * from $this->_matchTable");
             $qe_heading = $qe->get_float("heading");
             while (($row = PaperInfo::fetch($result, $this->cid))) {
                 if (!$this->contact->canViewPaper($row)
@@ -2689,8 +2711,9 @@ class PaperSearch {
                 } else
                     $x = !!$this->_clauseTermCheck($qe, $row);
                 if ($x === false)
-                    $delete[] = $row->paperId;
-                else if ($this->thenmap !== null) {
+                    continue;
+                $this->_matches[] = (int) $row->paperId;
+                if ($this->thenmap !== null) {
                     $this->thenmap[$row->paperId] = $x;
                     $qex = $qe->value[$x];
                     $this->headingmap[$row->paperId] =
@@ -2698,17 +2721,11 @@ class PaperSearch {
                 } else if ($qe_heading)
                     $this->headingmap[$row->paperId] = $qe_heading;
             }
-            if (count($delete)) {
-                $q = "delete from $this->_matchTable where paperId in (" . join(",", $delete) . ")";
-                //$Conf->infoMsg(nl2br(str_replace(" ", "&nbsp;", htmlspecialchars($q))));
-                if (!$Conf->qe($q)) {
-                    $Conf->q("drop temporary table $this->_matchTable");
-                    return ($this->_matchTable = false);
-                }
-            }
             if (!count($this->headingmap))
                 $this->headingmap = null;
-        }
+        } else
+            while (($row = $result->fetch_object()))
+                $this->_matches[] = (int) $row->paperId;
         $this->viewmap = $qe->get_float("view", array());
 
         // extract regular expressions and set _reviewer if the query is
@@ -2839,21 +2856,10 @@ class PaperSearch {
             || @$this->viewmap["sort"];
     }
 
-    function matchTable() {
-        if ($this->_matchTable === null)
-            $this->_search();
-        return $this->_matchTable;
-    }
-
     function paperList() {
-        global $Conf;
-        if (!$this->_matchTable && !$this->_search())
-            return array();
-        $x = array();
-        $result = $Conf->q("select paperId from $this->_matchTable");
-        while (($row = edb_row($result)))
-            $x[] = (int) $row[0];
-        return $x;
+        if ($this->_matches === null)
+            $this->_search();
+        return $this->_matches ? : array();
     }
 
     function url_site_relative_raw($q = null) {

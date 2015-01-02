@@ -119,6 +119,7 @@ class MailSender {
         foreach (array("recipients", "subject", "emailBody", "cc", "replyto", "q", "t", "plimit", "newrev_since") as $x)
             if (isset($_REQUEST[$x]))
                 echo Ht::hidden($x, $_REQUEST[$x]);
+        $recipients = defval($_REQUEST, "recipients", "");
         if ($this->sending) {
             echo "<div id='foldmail' class='foldc fold2c'>",
                 "<div class='fn fx2 merror'>In the process of sending mail.  <strong>Do not leave this page until this message disappears!</strong><br /><span id='mailcount'></span></div>",
@@ -141,7 +142,7 @@ class MailSender {
                     echo "<div class='warning'>Mails to users who have not completed their own reviews will not include reviews or comments. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change the setting</a>)</div>\n";
             }
             if (isset($_REQUEST["emailBody"]) && $Me->privChair
-                && substr($_REQUEST["recipients"], 0, 4) == "dec:") {
+                && substr($recipients, 0, 4) == "dec:") {
                 if (!$Conf->timeAuthorViewDecision())
                     echo "<div class='warning'>You appear to be sending an acceptance or rejection notification, but authors can’t see paper decisions on the site. (<a href='", hoturl("settings", "group=dec"), "' class='nowrap'>Change this setting</a>)</div>\n";
             }
@@ -151,7 +152,7 @@ class MailSender {
                 "<div class='fx info'>Verify that the mails look correct, then select “Send” to send the checked mails.<br />",
                 "Mailing to:&nbsp;", $this->recip->unparse(),
                 "<span id='mailinfo'></span>";
-            if (!preg_match('/\A(?:pc\z|pc:|all\z)/', $_REQUEST["recipients"])
+            if (!preg_match('/\A(?:pc\z|pc:|all\z)/', $recipients)
                 && defval($_REQUEST, "plimit") && $_REQUEST["q"] !== "")
                 echo "<br />Paper selection:&nbsp;", htmlspecialchars($_REQUEST["q"]);
             echo "</div><div class='aa fx'>", Ht::submit("send", "Send"),
@@ -168,7 +169,7 @@ class MailSender {
         global $Conf;
         if (!$this->started)
             $this->echo_prologue();
-        $s = "\$\$('mailcount').innerHTML=\"" . round(100 * $nrows_done / $nrows_left) . "% done.\";";
+        $s = "\$\$('mailcount').innerHTML=\"" . round(100 * $nrows_done / max(1, $nrows_left)) . "% done.\";";
         if (!$this->sending) {
             $m = plural($this->mcount, "mail") . ", "
                 . plural($this->mrecipients, "recipient");
@@ -244,12 +245,16 @@ class MailSender {
     }
 
     private function process_prep($prep, &$last_prep, $row) {
-        global $Me, $Opt;
-        $mail_differs = ($prep->subject != $last_prep->subject
-                         || $prep->body != $last_prep->body
-                         || @$prep->headers["cc"] != @$last_prep->headers["cc"]
-                         || @$prep->headers["reply-to"] != @$last_prep->headers["reply-to"]
-                         || $row->paperId != $last_prep->paperId);
+        // Don't combine senders if anything differs. Also, don't combine
+        // mails from different papers, unless those mails are to the same
+        // person.
+        $mail_differs = $prep->subject != $last_prep->subject
+            || $prep->body != $last_prep->body
+            || @$prep->headers["cc"] != @$last_prep->headers["cc"]
+            || @$prep->headers["reply-to"] != @$last_prep->headers["reply-to"]
+            || ($row->paperId != $last_prep->paperId
+                && (count($last_prep->contacts) != 1
+                    || $last_prep->to[0] !== $prep->to));
         $prep_to = $prep->to;
 
         if ($mail_differs) {
@@ -273,16 +278,27 @@ class MailSender {
     private function run() {
         global $Conf, $Opt, $Me, $Error, $subjectPrefix,
             $checkReviewNeedsSubmit, $mailer_options;
-        $q = $this->recip->query();
+
+        $subject = trim(defval($_REQUEST, "subject", ""));
+        if (substr($subject, 0, strlen($subjectPrefix)) != $subjectPrefix)
+            $subject = $subjectPrefix . $subject;
+        $emailBody = $_REQUEST["emailBody"];
+        $template = array("subject" => $subject, "body" => $emailBody);
+        $rest = array("cc" => $_REQUEST["cc"], "reply-to" => $_REQUEST["replyto"], "no_error_quit" => true);
+        $rest = array_merge($rest, $mailer_options);
+
+        // test whether this mail is paper-sensitive
+        $mailer = new HotCRPMailer($Me, null, $rest);
+        $prep = $mailer->make_preparation($template, $rest);
+        $paper_sensitive = preg_match('/%[A-Z0-9]+[(%]/', $prep->subject . $prep->body);
+
+        $q = $this->recip->query($paper_sensitive);
         if (!$q)
             return $Conf->errorMsg("Bad recipients value");
         $result = $Conf->qe($q);
         if (!$result)
             return;
 
-        $subject = trim(defval($_REQUEST, "subject", ""));
-        if (substr($subject, 0, strlen($subjectPrefix)) != $subjectPrefix)
-            $subject = $subjectPrefix . $subject;
         if ($this->sending) {
             $q = "recipients='" . sqlq($_REQUEST["recipients"])
                 . "', cc='" . sqlq($_REQUEST["cc"])
@@ -291,16 +307,11 @@ class MailSender {
                 . "', emailBody='" . sqlq($_REQUEST["emailBody"]) . "'";
             if ($Conf->sversion >= 79)
                 $q .= ", q='" . sqlq($_REQUEST["q"]) . "', t='" . sqlq($_REQUEST["t"]) . "'";
-            if (($log_result = Dbl::real_query("insert into MailLog set $q")))
+            if (($log_result = Dbl::raw_query("insert into MailLog set $q")))
                 $this->mailid_text = " #" . $log_result->insert_id;
             $Me->log_activity("Sending mail$this->mailid_text \"$subject\"");
         }
-        $emailBody = $_REQUEST["emailBody"];
 
-        $template = array("subject" => $subject, "body" => $emailBody);
-        $rest = array("cc" => $_REQUEST["cc"], "reply-to" => $_REQUEST["replyto"],
-                      "no_error_quit" => true);
-        $rest = array_merge($rest, $mailer_options);
         $mailer = new HotCRPMailer;
         $fake_prep = (object) array("subject" => "", "body" => "", "to" => array(),
                                     "paperId" => -1, "contactId" => array(), "fake" => 1);

@@ -1,12 +1,12 @@
-/* -*- mode: css; indent-tabs-mode: t -*- */
+/* -*- mode: css; indent-tabs-mode: t; css-indent-offset: 8 -*- */
 /* style.css -- HotCRP CSS styles */
 /* HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC */
 /* Distributed under an MIT-like license; see LICENSE */
 
 /* page background */
 body {
-	font-family: verdana, tahoma, sans-serif;
-	font-size: 10.5pt; /* grep MAINSIZE */
+	font-family: "Helvetica Neue", Helvetica, Arial, verdana, tahoma, sans-serif;
+	font-size: 11pt; /* grep MAINSIZE */
 	color: black;
 	background-color: white;
 	margin: 0;
@@ -14,11 +14,6 @@ body {
 
 
 /* header */
-#header {
-	background-image: url(../images/headgrad.png);
-	background-repeat: repeat-x;
-	background-position: top;
-}
 #header_right {
 	padding: 8px 12px 0 12px;
 	font-size: smaller;
@@ -35,12 +30,16 @@ body {
 #header_left_conf {
 	float: left;
 	padding: 0.2em 0.8em 0.3em 0.8em;
+	margin-left: 20px;
 	border-bottom: 2px solid #b2a584;
 	border-right: 1px solid #b2a584;
-	background-color: #ffffbb;
-	background-image: url(../images/homegrad.png);
+	background-color: #ffbbbb;
+	color: #f33360;
 	background-repeat: repeat-x;
 	background-position: bottom;
+}
+#header_left_conf a {
+	color: #f35380;
 }
 #header_left_page {
 	float: left;
@@ -496,6 +495,9 @@ span.optvalue {
 table.center {
 	margin-left: auto;
 	margin-right: auto;
+}
+table.pltable {
+	line-height: 125%;
 }
 body#revpref table.pltable, body#accounts table.ppltable {
 	margin: 0 auto;
@@ -1183,6 +1185,7 @@ span.asspref-1 {
 	display: inline-block;
 	width: 0.75em;
         height: 0.75em;
+	line-height: 0.75em;
         border-width: 1px;
         position: relative;
 	bottom: -0.1em;
@@ -1210,8 +1213,7 @@ span.asspref-1 {
         position: absolute;
 	width: 100%;
 	height: 100%;
-	bottom: 10%;
-        font-family: verdana, tahoma, sans-serif;
+        font-family: "Helvetica Neue", Helvetica, verdana, tahoma, sans-serif;
 	font-size: 70%;
 	text-align: center;
 }
@@ -1240,19 +1242,6 @@ img.timestamp12 {
 	background-position: -40px -11px;
 }
 
-img.expander {
-	background-image: url(../images/sprite.png?2);
-	width: 9px;
-	height: 9px;
-	border: 0 none;
-}
-.foldc img.expander {
-	background-position: -11px 0;
-}
-.foldo img.expander {
-	background-position: -21px 0;
-}
-
 table.topicinterest tr td.ti_interest, table.topicinterest tr th {
 	padding-right: 1px;
 	white-space: nowrap;
@@ -1266,6 +1255,7 @@ table.reviewers, div.revnotes {
 	margin-bottom: 0.5em;
 }
 table.reviewers {
+	line-height: 125%;
 	margin-left: -6px;
 }
 table.reviewers > tbody > tr > td:first-child {
@@ -1378,7 +1368,7 @@ table.pltable th, table.ppltable th, table.setreviewform th, table.auedittable t
 	padding-right: 0.125em;
 	vertical-align: bottom;
 }
-div.pl_splitcol, tr.pl_footgap.pl_splitcol > td {
+div.pl_splitcol {
 	padding-right: 1.5em;
 }
 div.pl_splitcol_ctr {
@@ -1444,8 +1434,9 @@ table.pltable th.pl_tagval {
 	text-align: right;
 	white-space: nowrap;
 }
-.pl_footselector {
+tr.pl_footrow > td.pl_footselector {
 	vertical-align: top;
+	padding-top: 0;
 	padding-right: 4px;
 }
 table.ppltable td.pl_sel,
@@ -1518,8 +1509,9 @@ table.ppltable td.pl_score {
 	padding-left: 0.2em;
 	padding-right: 0.2em;
 }
-tr.plx td {
-	font-size: smaller;
+tr.plx {
+	font-size: 85%;
+	line-height: 135%;
 }
 tr.plx h6 {
 	display: inline;
@@ -1555,11 +1547,9 @@ tr.pl_headrow td, td.pl_footer, tr.pl_headrow th, tr.al_headrow th,
 table.setreviewform th, table.auedittable th {
 	font-size: smaller;
 }
-td.pl_footer {
+tr.pl_footrow > td {
+	border-top: 1px solid #ccb7a3; /* #9999cc; */
 	padding-top: 3px;
-}
-tr.pl_headgap td {
-	padding-top: 2px;
 }
 div.pl_footgap {
 	padding-top: 3px;
@@ -1688,10 +1678,16 @@ a.pl_sort_def_rev {
 tbody.pltable_colored > tr.pl {
 	border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
+tbody.pltable_colored > tr:first-child {
+	border-top: 0 none;
+}
+tbody.pltable > tr:last-child > td {
+	padding-bottom: 2px;
+}
 .k1 {
 	background-color: #f1f8fc;
 }
-tbody.pltable_colored > tr.k1 {
+tbody.pltable_colored > tr.k1, tfoot.pltable_colored > tr.k1 {
 	background-color: inherit;
 }
 tr.redtag, tr.orangetag, tr.yellowtag, tr.greentag, tr.bluetag,
@@ -1786,87 +1782,115 @@ tr.pl.smalltag, tr.plx.smalltag {
 
 .redtag.orangetag, .redtag.orangetag.psc {
 	background-image: url(../images/tag_red_orange.png);
+	background-color: transparent;
 }
 .redtag.yellowtag, .redtag.yellowtag.psc {
 	background-image: url(../images/tag_red_yellow.png);
+	background-color: transparent;
 }
 .redtag.greentag, .redtag.greentag.psc {
 	background-image: url(../images/tag_red_green.png);
+	background-color: transparent;
 }
 .redtag.bluetag, .redtag.bluetag.psc {
 	background-image: url(../images/tag_red_blue.png);
+	background-color: transparent;
 }
 .redtag.purpletag, .redtag.purpletag.psc {
 	background-image: url(../images/tag_red_purple.png);
+	background-color: transparent;
 }
 .redtag.graytag, .redtag.graytag.psc {
 	background-image: url(../images/tag_red_gray.png);
+	background-color: transparent;
 }
 .redtag.whitetag, .redtag.whitetag.psc {
 	background-image: url(../images/tag_red_white.png);
+	background-color: transparent;
 }
 .orangetag.yellowtag, .orangetag.yellowtag.psc {
 	background-image: url(../images/tag_orange_yellow.png);
+	background-color: transparent;
 }
 .orangetag.greentag, .orangetag.greentag.psc {
 	background-image: url(../images/tag_orange_green.png);
+	background-color: transparent;
 }
 .orangetag.bluetag, .orangetag.bluetag.psc {
 	background-image: url(../images/tag_orange_blue.png);
+	background-color: transparent;
 }
 .orangetag.purpletag, .orangetag.purpletag.psc {
 	background-image: url(../images/tag_orange_purple.png);
+	background-color: transparent;
 }
 .orangetag.graytag, .orangetag.graytag.psc {
 	background-image: url(../images/tag_orange_gray.png);
+	background-color: transparent;
 }
 .orangetag.whitetag, .orangetag.whitetag.psc {
 	background-image: url(../images/tag_orange_white.png);
+	background-color: transparent;
 }
 .yellowtag.greentag, .yellowtag.greentag.psc {
 	background-image: url(../images/tag_yellow_green.png);
+	background-color: transparent;
 }
 .yellowtag.bluetag, .yellowtag.bluetag.psc {
 	background-image: url(../images/tag_yellow_blue.png);
+	background-color: transparent;
 }
 .yellowtag.purpletag, .yellowtag.purpletag.psc {
 	background-image: url(../images/tag_yellow_purple.png);
+	background-color: transparent;
 }
 .yellowtag.graytag, .yellowtag.graytag.psc {
 	background-image: url(../images/tag_yellow_gray.png);
+	background-color: transparent;
 }
 .yellowtag.whitetag, .yellowtag.whitetag.psc {
 	background-image: url(../images/tag_yellow_white.png);
+	background-color: transparent;
 }
 .greentag.bluetag, .greentag.bluetag.psc {
 	background-image: url(../images/tag_green_blue.png);
+	background-color: transparent;
 }
 .greentag.purpletag, .greentag.purpletag.psc {
 	background-image: url(../images/tag_green_purple.png);
+	background-color: transparent;
 }
 .greentag.graytag, .greentag.graytag.psc {
 	background-image: url(../images/tag_green_gray.png);
+	background-color: transparent;
 }
 .greentag.whitetag, .greentag.whitetag.psc {
 	background-image: url(../images/tag_green_white.png);
+	background-color: transparent;
 }
 .bluetag.purpletag, .bluetag.purpletag.psc {
 	background-image: url(../images/tag_blue_purple.png);
+	background-color: transparent;
 }
 .bluetag.graytag, .bluetag.graytag.psc {
 	background-image: url(../images/tag_blue_gray.png);
+	background-color: transparent;
 }
 .bluetag.whitetag, .bluetag.whitetag.psc {
 	background-image: url(../images/tag_blue_white.png);
+	background-color: transparent;
 }
 .purpletag.graytag, .purpletag.graytag.psc {
 	background-image: url(../images/tag_purple_gray.png);
+	background-color: transparent;
 }
 .purpletag.whitetag, .purpletag.whitetag.psc {
 	background-image: url(../images/tag_purple_white.png);
+	background-color: transparent;
 }
 .graytag.whitetag, .graytag.whitetag.psc {
 	background-image: url(../images/tag_gray_white.png);
+	background-color: transparent;
 }
 
 .graytext {
@@ -2179,7 +2203,6 @@ div.papt {
 div.pavt {
 	margin: 0 -5px;
 	padding: 0.25em 5px;
-	background: #eaeaff; /*#ffeaee;*/
 }
 div.pavb {
 	padding: 2px 0 0 0;
@@ -2197,6 +2220,7 @@ body#paper_edit span.papfn {
 div.papt span.papfnh {
 	font-variant: normal;
 	font-weight: normal;
+	text-transform: none;
 	color: #555555;
 }
 div.papt span.hint {
@@ -2305,7 +2329,7 @@ div.revt {
 span.revfn {
 	float: left;
 }
-.revvis, .cmtvis {
+.revvis {
 	padding-left: 1em;
 	color: #999999;
 }
@@ -2407,11 +2431,14 @@ div.cmtcard_head span.cmtfn {
 }
 div.cmtg {
 	border-top: 1px solid #f7f1df;
-	padding: 5px 0;
+	padding: 8px 0;
 }
 div.cmtg:first-child {
 	border-top: 0 none;
-	padding: 0 0 5px;
+	padding-top: 0;
+}
+div.cmtg:last-child {
+	padding-bottom: 0;
 }
 span.cmtfn > span.barsep {
 	color: #eadeb7;
@@ -2425,8 +2452,13 @@ div.cmtadminvis {
 }
 div.cmtt {
 	font-size: smaller;
-	padding: 2px 0;
+	padding: 2px 0 6px;
 	color: #666666;
+}
+div.cmtt:after {
+	content: " ";
+	clear: both;
+	display: table;
 }
 div.cmtt div.floatright {
 	padding-left: 0.5em;
@@ -2469,17 +2501,29 @@ div.aab {
 }
 div.aahc.alert div.aab {
 	background: #ffaaaa;
-	background: linear-gradient(to bottom, rgba(255,170,170,0), #ffaaaa 4px, #ffaaaa 50%, transparent 50%),
-		linear-gradient(to top, rgba(255,170,170,0), #ffaaaa 4px, #ffaaaa 50%, transparent 50%);
+	background: linear-gradient(to bottom, rgba(255,170,170,0), #ffaaaa 4px, #ffaaaa 51%, transparent 51%),
+		linear-gradient(to top, rgba(255,170,170,0), #ffaaaa 4px, #ffaaaa 51%, transparent 51%);
 }
 div.revtext, div.cmttext {
 	white-space: pre-wrap;
 	max-width: 42em;
+	line-height: 125%;
 }
 div#foldaddcomment div.cmtv {
 	padding-bottom: 0;
 }
-span.cmtnumhead span.cmtnumat {
+.cmtnumhead {
+	float: left;
+	padding-right: 0.75em;
+}
+.cmtname, .cmttime, .cmttags, .cmtvis {
+	float: left;
+	padding-right: 1.5em;
+}
+.cmttime, .cmtvis {
+	color: #999999;
+}
+.cmtnumhead span.cmtnumat {
 	color: #aaaaaa;
 }
 div.cmtev {
@@ -2671,7 +2715,7 @@ div.scorehelpc, tr.aueditc td {
 	display: none;
 }
 div.scorehelpc span.rev_num, div.scorehelpo span.rev_num {
-	font-size: 10.5pt; /* MAINSIZE */
+	font-size: larger;
 }
 
 /* popup dialogs */
