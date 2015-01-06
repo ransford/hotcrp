@@ -251,6 +251,9 @@ class ReviewStatusPaperColumn extends PaperColumn {
         return "<col width='0*' />";
     }
     public function content_empty($pl, $row) {
+        if (! $pl->contact->privChair) {
+                return true;
+        }
         return !($pl->contact->allow_administer($row)
                  || ($pl->contact->isPC && ($row->conflictType == 0 || $this->auview))
                  || $row->reviewType > 0
