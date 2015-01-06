@@ -143,8 +143,8 @@ function caller_landmark($position = 1, $skipfunction_re = null) {
         list($position, $skipfunction_re) = array(1, $position);
     $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
     while ($skipfunction_re && isset($trace[$position + 1])) {
-        $fname = (string) @$trace[$position + 1]["class"];
-        $fname .= ($fname ? "::" : "") . $trace[$position + 1]["function"];
+        $fname = (string) @$trace[$position]["class"];
+        $fname .= ($fname ? "::" : "") . $trace[$position]["function"];
         if (!preg_match($skipfunction_re, $fname))
             break;
         ++$position;
@@ -158,4 +158,16 @@ function caller_landmark($position = 1, $skipfunction_re = null) {
         return $pi["function"];
     else
         return "<unknown>";
+}
+
+
+// pcntl helpers
+
+if (!function_exists("pcntl_wifexited")) {
+    function pcntl_wifexited($status) {
+        return ($status & 0x7f) == 0;
+    }
+    function pcntl_wexitstatus($status) {
+        return ($status & 0xff00) >> 8;
+    }
 }

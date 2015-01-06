@@ -172,13 +172,14 @@ function hoturl_site_relative($page, $options = null) {
                 $options .= "&amp;" . $k . "=" . $v;
     // append forceShow to links to same paper if appropriate
     $is_paper_page = preg_match('/\A(?:paper|review|comment|assign)\z/', $page);
-    if (@$paperTable && $paperTable->prow && $is_paper_page
+    if ($is_paper_page && @$paperTable && $paperTable->prow
         && preg_match($are . 'p=' . $paperTable->prow->paperId . $zre, $options)
         && $Me->can_administer($paperTable->prow)
         && $paperTable->prow->has_conflict($Me)
         && !preg_match($are . 'forceShow=/', $options))
         $options .= "&amp;forceShow=1";
-    if (@$paperTable && $paperTable->prow && $is_paper_page
+    // append list links if appropriate
+    if ($is_paper_page && @$paperTable && $paperTable->prow
         && @$CurrentList && $CurrentList > 0
         && !preg_match($are . 'ls=/', $options))
         $options .= "&amp;ls=$CurrentList";
@@ -473,7 +474,7 @@ function topicTable($prow, $active = 0) {
     return $out . "</td></tr></table>";
 }
 
-function viewas_link($cid, $contact = null) {
+function actas_link($cid, $contact = null) {
     global $Conf;
     $contact = !$contact && is_object($cid) ? $cid : $contact;
     $cid = is_object($contact) ? $cid->email : $cid;
@@ -495,7 +496,7 @@ function authorTable($aus, $viewAs = null) {
                 $out .= "<span class='autblentry'>";
             $out .= $au;
             if ($viewAs !== null && is_array($aux) && count($aux) >= 2 && $viewAs->email != $aux[2] && $viewAs->privChair)
-                $out .= " " . viewas_link($aux[2], $aux);
+                $out .= " " . actas_link($aux[2], $aux);
             $out .= "</span> ";
         }
     }
@@ -726,24 +727,6 @@ function tempdir($mode = 0700) {
     return false;
 }
 
-
-function setCommentType($crow) {
-    if ($crow && !isset($crow->commentType)) {
-        if ($crow->forAuthors == 2)
-            $crow->commentType = COMMENTTYPE_RESPONSE | COMMENTTYPE_AUTHOR
-                | ($crow->forReviewers ? 0 : COMMENTTYPE_DRAFT);
-        else if ($crow->forAuthors == 1)
-            $crow->commentType = COMMENTTYPE_AUTHOR;
-        else if ($crow->forReviewers == 2)
-            $crow->commentType = COMMENTTYPE_ADMINONLY;
-        else if ($crow->forReviewers)
-            $crow->commentType = COMMENTTYPE_REVIEWER;
-        else
-            $crow->commentType = COMMENTTYPE_PCONLY;
-        if (isset($crow->commentBlind) ? $crow->commentBlind : $crow->blind)
-            $crow->commentType |= COMMENTTYPE_BLIND;
-    }
-}
 
 // watch functions
 function saveWatchPreference($paperId, $contactId, $watchtype, $on) {
@@ -1224,7 +1207,7 @@ function pcMembers() {
     if (!@$PcMembersCache
         || $Conf->setting("pc") <= 0
         || $PcMembersCache[0] < $Conf->setting("pc")
-        || $PcMembersCache[2] != @$Opt["sortByLastName"]) {
+        || $PcMembersCache[1] != @$Opt["sortByLastName"]) {
         $pc = array();
         $result = $Conf->q("select firstName, lastName, affiliation, email, ContactInfo.contactId contactId, roles, contactTags, disabled from ContactInfo join PCMember using (contactId)");
         $by_name_text = array();
@@ -1244,9 +1227,9 @@ function pcMembers() {
             $row->sort_position = $order;
             ++$order;
         }
-        $PcMembersCache = array($Conf->setting("pc"), $pc, @$Opt["sortByLastName"]);
+        $PcMembersCache = array($Conf->setting("pc"), @$Opt["sortByLastName"], $pc);
     }
-    return $PcMembersCache[1];
+    return $PcMembersCache[2];
 }
 
 function pcTags() {

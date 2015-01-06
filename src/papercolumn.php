@@ -3,6 +3,19 @@
 // HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
+class PaperColumnErrors {
+    public $error_html = array();
+    public $priority = null;
+    public function add($error_html, $priority) {
+        if ($this->priority === null || $this->priority < $priority) {
+            $this->error_html = array();
+            $this->priority = $priority;
+        }
+        if ($this->priority == $priority)
+            $this->error_html[] = $error_html;
+    }
+}
+
 class PaperColumn extends Column {
     static private $by_name = array();
     static private $factories = array();
@@ -15,12 +28,13 @@ class PaperColumn extends Column {
         return defval(self::$by_name, $name, null);
     }
 
-    public static function lookup($name) {
-        if (isset(self::$by_name[$name]))
-            return self::$by_name[$name];
+    public static function lookup($name, $errors = null) {
+        $lname = strtolower($name);
+        if (isset(self::$by_name[$lname]))
+            return self::$by_name[$lname];
         foreach (self::$factories as $f)
-            if (str_starts_with(strtolower($name), $f[0])
-                && ($x = $f[1]->make_field($name)))
+            if (str_starts_with($lname, $f[0])
+                && ($x = $f[1]->make_field($name, $errors)))
                 return $x;
         return null;
     }
@@ -463,10 +477,9 @@ class ReviewerTypePaperColumn extends PaperColumn {
     }
     public function header($pl, $row, $ordinal) {
         if ($this->xreviewer)
-            return "<span class='hastitle' title='Reviewer type'>"
-                . Text::name_html($this->xreviewer) . "<br />Review</span>";
+            return Text::name_html($this->xreviewer) . "<br />Review</span>";
         else
-            return "<span class='hastitle' title='Reviewer type'>Review</span>";
+            return "Review";
     }
     public function col() {
         return "<col width='0*' />";
@@ -746,23 +759,23 @@ class ReviewerListPaperColumn extends PaperColumn {
         return "Reviewers";
     }
     public function content($pl, $row) {
-        $prefs = PaperList::_rowPreferences($row);
-        $n = "";
         // see also search.php > getaction == "reviewers"
-        if (isset($pl->review_list[$row->paperId])) {
-            foreach ($pl->review_list[$row->paperId] as $xrow)
-                if ($xrow->lastName) {
-                    $ranal = $pl->_reviewAnalysis($xrow);
-                    $n .= ($n ? ", " : "");
-                    $n .= Text::name_html($xrow);
-                    if ($xrow->reviewType >= REVIEW_SECONDARY)
-                        $n .= "&nbsp;" . PaperList::_reviewIcon($xrow, $ranal, false);
-                    if (($pref = defval($prefs, $xrow->contactId, null)))
-                        $n .= unparse_preference_span($pref);
-                }
-            $n = $pl->maybeConflict($row, $n, $pl->contact->canViewReviewerIdentity($row, null, false));
-        }
-        return $n;
+        if (!isset($pl->review_list[$row->paperId]))
+            return "";
+        $x = array();
+        $prefs = $pl->contact->privChair ? PaperList::_rowPreferences($row) : array();
+        foreach ($pl->review_list[$row->paperId] as $xrow)
+            if ($xrow->lastName) {
+                $ranal = $pl->_reviewAnalysis($xrow);
+                $n = Text::name_html($xrow);
+                if ($xrow->reviewType >= REVIEW_SECONDARY)
+                    $n .= "&nbsp;" . PaperList::_reviewIcon($xrow, $ranal, false);
+                if (($pref = defval($prefs, $xrow->contactId, null)))
+                    $n .= unparse_preference_span($pref);
+                $x[] = '<span class="nw">' . $n . '</span>';
+            }
+        return $pl->maybeConflict($row, join(", ", $x),
+                                  $pl->contact->canViewReviewerIdentity($row, null, false));
     }
 }
 
@@ -844,13 +857,12 @@ class TagListPaperColumn extends PaperColumn {
         return !$pl->contact->canViewTags($row, true);
     }
     public function content($pl, $row) {
-        if (($t = $row->paperTags) !== "") {
-            $viewable = $pl->tagger->viewable($row->paperTags);
-            $t = $pl->tagger->unparse_and_link($viewable, $row->paperTags,
-                                               $pl->search->orderTags,
-                                               $row->conflictType <= 0);
-        }
-        return $t;
+        if ((string) $row->paperTags === "")
+            return "";
+        $viewable = $pl->tagger->viewable($row->paperTags);
+        return $pl->tagger->unparse_and_link($viewable, $row->paperTags,
+                                             $pl->search->orderTags,
+                                             $row->conflictType <= 0);
     }
 }
 
@@ -866,7 +878,7 @@ class TagPaperColumn extends PaperColumn {
         $this->is_value = $is_value;
         $this->cssname = ($this->is_value ? "tagval" : "tag");
     }
-    public function make_field($name) {
+    public function make_field($name, $errors) {
         $p = strpos($name, ":") ? : strpos($name, "#");
         return parent::register(new TagPaperColumn($name, substr($name, $p + 1), $this->is_value));
     }
@@ -876,7 +888,7 @@ class TagPaperColumn extends PaperColumn {
         $tagger = new Tagger($pl->contact);
         if (!($ctag = $tagger->check($this->dtag, Tagger::NOVALUE)))
             return false;
-        $this->ctag = " $ctag#";
+        $this->ctag = strtolower(" $ctag#");
         $queryOptions["tags"] = 1;
         return true;
     }
@@ -936,7 +948,7 @@ class EditTagPaperColumn extends TagPaperColumn {
         $this->cssname = ($this->is_value ? "edittagval" : "edittag");
         $this->editable = true;
     }
-    public function make_field($name) {
+    public function make_field($name, $errors) {
         $p = strpos($name, ":") ? : strpos($name, "#");
         return parent::register(new EditTagPaperColumn($name, substr($name, $p + 1), $this->is_value));
     }
@@ -996,7 +1008,7 @@ class ScorePaperColumn extends PaperColumn {
             ksort(self::$registered);
         }
     }
-    public function make_field($name) {
+    public function make_field($name, $errors) {
         $rf = reviewForm();
         if ((($f = $rf->field($name))
              || (($name = $rf->unabbreviateField($name))
@@ -1024,24 +1036,31 @@ class ScorePaperColumn extends PaperColumn {
     public function sort_prepare($pl, &$rows, $sorter) {
         $scoreName = $this->score . "Scores";
         $view_score = $this->form_field->view_score;
+        $this->_sortinfo = $sortinfo = "_score_sort_info." . $this->score . $sorter->score;
+        $this->_avginfo = $avginfo = "_score_sort_avg." . $this->score;
+        $reviewer = $pl->reviewer_cid();
         foreach ($rows as $row)
-            if ($pl->contact->canViewReview($row, $view_score, null))
-                $pl->score_analyze($row, $scoreName, $this->max_score,
-                                   $pl->sorters[0]->score);
-            else
-                $pl->score_reset($row);
-        $this->_textual_sort =
-            ($pl->sorters[0]->score == "M" || $pl->sorters[0]->score == "C"
-             || $pl->sorters[0]->score == "Y");
+            if ($pl->contact->canViewReview($row, $view_score, null)) {
+                $scoreinfo = new ScoreInfo($row->scores($this->score));
+                $row->$sortinfo = $scoreinfo->sort_data($sorter->score, $reviewer);
+                $row->$avginfo = $scoreinfo->average();
+            } else {
+                $row->$sortinfo = ScoreInfo::empty_sort_data($sorter->score);
+                $row->$avginfo = -1;
+            }
+        $this->_textual_sort = ScoreInfo::sort_by_strcmp($sorter->score);
     }
     public function score_sorter($a, $b) {
+        $sortinfo = $this->_sortinfo;
         if ($this->_textual_sort)
-            return strcmp($b->_sort_info, $a->_sort_info);
-        else {
-            $x = $b->_sort_info - $a->_sort_info;
-            $x = $x ? $x : $b->_sort_average - $a->_sort_average;
-            return $x < 0 ? -1 : ($x == 0 ? 0 : 1);
+            $x = strcmp($b->$sortinfo, $a->$sortinfo);
+        else
+            $x = $b->$sortinfo - $a->$sortinfo;
+        if (!$x) {
+            $avginfo = $this->_avginfo;
+            $x = $b->$avginfo - $a->$avginfo;
         }
+        return $x < 0 ? -1 : ($x == 0 ? 0 : 1);
     }
     public function header($pl, $row, $ordinal) {
         return $this->form_field->web_abbreviation();
@@ -1070,7 +1089,7 @@ class FormulaPaperColumn extends PaperColumn {
     private static $registered = array();
     public static $list = array();
     public function __construct($name, $formula) {
-        parent::__construct($name, Column::VIEW_COLUMN | Column::FOLDABLE,
+        parent::__construct(strtolower($name), Column::VIEW_COLUMN | Column::FOLDABLE,
                             array("minimal" => true, "sorter" => "formula_sorter"));
         $this->cssname = "formula";
         $this->formula = $formula;
@@ -1084,18 +1103,21 @@ class FormulaPaperColumn extends PaperColumn {
         PaperColumn::register($fdef);
         self::$registered[] = $fdef;
     }
-    public function make_field($name) {
+    public function make_field($name, $errors) {
         foreach (self::$registered as $col)
-            if ($col->formula->name == $name)
+            if (strcasecmp($col->formula->name, $name) == 0)
                 return $col;
-        if (strpos($name, "(") !== false
-            && ($fexpr = Formula::parse($name, true))) {
-            $fdef = new FormulaPaperColumn("formulax" . (count(self::$registered) + 1),
-                                           new FormulaInfo($name, $fexpr));
-            self::register($fdef);
-            return $fdef;
+        if (strpos($name, "(") === false || substr($name, 0, 4) === "edit")
+            return null;
+        $formula = new Formula($name);
+        if (!$formula->check()) {
+            if ($errors)
+                $errors->add($formula->error_html(), 1);
+            return null;
         }
-        return null;
+        $fdef = new FormulaPaperColumn("formulax" . (count(self::$registered) + 1), $formula);
+        self::register($fdef);
+        return $fdef;
     }
     public function prepare($pl, &$queryOptions, $visible) {
         global $ConfSitePATH;
@@ -1104,12 +1126,11 @@ class FormulaPaperColumn extends PaperColumn {
             && $pl->search->limitName != "a")
             $revView = $pl->contact->viewReviewFieldsScore(null, true);
         if (!$pl->scoresOk
-            || $this->formula->authorView <= $revView)
+            || !$this->formula->check()
+            || $this->formula->base_view_score() <= $revView)
             return false;
-        if (!($expr = Formula::parse($this->formula->expression, true)))
-            return false;
-        $this->formula_function = Formula::compile_function($expr, $pl->contact);
-        Formula::add_query_options($queryOptions, $expr, $pl->contact);
+        $this->formula_function = $this->formula->compile_function($pl->contact);
+        $this->formula->add_query_options($queryOptions, $pl->contact);
         return true;
     }
     public function sort_prepare($pl, &$rows, $sorter) {
@@ -1124,10 +1145,7 @@ class FormulaPaperColumn extends PaperColumn {
             : ($a->$sorter == $b->$sorter ? 0 : 1);
     }
     public function header($pl, $row, $ordinal) {
-        if ($this->formula->heading == "")
-            $x = $this->formula->name;
-        else
-            $x = $this->formula->heading;
+        $x = $this->formula->column_header();
         if ($this->formula->headingTitle
             && $this->formula->headingTitle != $x)
             return "<span class=\"hastitle\" title=\"" . htmlspecialchars($this->formula->headingTitle) . "\">" . htmlspecialchars($x) . "</span>";
@@ -1390,7 +1408,7 @@ function initialize_paper_columns() {
     $formula = null;
     if ($Conf && $Conf->setting("formulas")) {
         $result = $Conf->q("select * from Formula order by lower(name)");
-        while (($row = edb_orow($result))) {
+        while ($result && ($row = $result->fetch_object("Formula"))) {
             $fid = $row->formulaId;
             $formula = new FormulaPaperColumn("formula$fid", $row);
             FormulaPaperColumn::register($formula);

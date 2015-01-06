@@ -40,16 +40,29 @@ if ($Me->is_empty() || isset($_REQUEST["signin"]))
     $_SESSION["testsession"] = true;
 
 // perhaps redirect through account
-if ($Me->has_database_account() && $Conf->session("freshlogin") === true) {
-    $needti = false;
-    if ($Me->is_pc_member() && !$Me->has_review()) {
-        $result = $Conf->q("select count(ta.topicId), count(ti.topicId) from TopicArea ta left join TopicInterest ti on (ti.contactId=$Me->contactId and ti.topicId=ta.topicId)");
-        $needti = ($row = edb_row($result)) && $row[0] && !$row[1];
+function need_profile_redirect($user) {
+    global $Conf, $Opt;
+    if (!@$user->firstName && !@$user->lastName)
+        return true;
+    if (@$Opt["noProfileRedirect"])
+        return false;
+    if (!$user->affiliation)
+        return true;
+    if ($user->is_pc_member() && !$user->has_review()) {
+        if (!$user->collaborators)
+            return true;
+        $tmap = $Conf->topic_map();
+        if (count($tmap)
+            && ($result = Dbl::qe("select count(topicId) from TopicInterest where contactId=$user->contactId"))
+            && ($row = edb_row($result))
+            && !$row[0])
+            return true;
     }
-    if (!($Me->firstName || $Me->lastName)
-        || !$Me->affiliation
-        || ($Me->is_pc_member() && !$Me->collaborators)
-        || $needti) {
+    return false;
+}
+
+if ($Me->has_database_account() && $Conf->session("freshlogin") === true) {
+    if (need_profile_redirect($Me)) {
         $Conf->save_session("freshlogin", "redirect");
         go(hoturl("profile", "redirect=1"));
     } else
@@ -383,7 +396,7 @@ if ($Me->is_reviewer() && ($Me->privChair || $papersub)) {
     else if ($Me->privChair)
         echo "  <span class='hint'>As an administrator, you may review <a href='", hoturl("search", "q=&amp;t=s"), "'>any submitted paper</a>.</span><br />\n";
 
-    if (($myrow || $Me->privChair) && $npc)
+    if ($myrow)
         echo "</div>\n<div id='foldre' class='homegrp foldo'>";
 
     // Actions
@@ -455,7 +468,7 @@ if ($Me->is_reviewer() && ($Me->privChair || $papersub)) {
             foreach ($entries as $which => $xr) {
                 $tr_class = "k" . ($which % 2) . ($which >= 10 ? " fx21" : "");
                 if ($xr->isComment)
-                    echo CommentView::commentFlowEntry($Me, $xr, $tr_class);
+                    echo CommentInfo::unparse_flow_entry($xr, $Me, $tr_class);
                 else {
                     $rf = ReviewForm::get($xr);
                     echo $rf->reviewFlowEntry($Me, $xr, $tr_class);

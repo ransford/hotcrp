@@ -92,7 +92,7 @@ class Conference {
             $OK = $oldOK;
         }
         $this->sversion = $this->settings["allowPaperOption"];
-        if ($this->sversion < 55)
+        if ($this->sversion < 56)
             $this->errorMsg("Warning: The database could not be upgraded to the current version; expect errors. A system administrator must solve this problem.");
 
         // invalidate caches after loading from backup
@@ -245,7 +245,9 @@ class Conference {
         Ht::$img_base = $Opt["assetsURL"] . "images/";
 
         // set docstore from filestore
-        if (!@$Opt["docstore"] && @$Opt["filestore"]) {
+        if (@$Opt["docstore"] === true)
+            $Opt["docstore"] = "docs";
+        else if (!@$Opt["docstore"] && @$Opt["filestore"]) {
             if (($Opt["docstore"] = $Opt["filestore"]) === true)
                 $Opt["docstore"] = "filestore";
             $Opt["docstoreSubdir"] = @$Opt["filestoreSubdir"];
@@ -649,7 +651,7 @@ class Conference {
     function query_error_handler($dblink, $query) {
         global $OK;
         if (PHP_SAPI == "cli")
-            fwrite(STDERR, caller_landmark("/^(?:Dbl::|Conference::q)/") . ": database error: $dblink->error in $query\n");
+            fwrite(STDERR, caller_landmark(1, "/^(?:Dbl::|Conference::q|call_user_func)/") . ": database error: $dblink->error in $query\n");
         else
             $this->errorMsg($this->db_error_html(true, Ht::pre_text_wrap($query)));
         $OK = false;
@@ -1101,10 +1103,7 @@ class Conference {
         $q = "select p.paperId, s.mimetype, s.sha1, s.timestamp, ";
         if (!@$Opt["docstore"] && !is_array($prow))
             $q .= "s.paper as content, ";
-        $q .= "s.filename, ";
-        if ($this->sversion >= 55)
-            $q .= "s.infoJson, ";
-        $q .= "$documentType documentType, s.paperStorageId from Paper p";
+        $q .= "s.filename, s.infoJson, $documentType documentType, s.paperStorageId from Paper p";
         if ($docid)
             $sjoin = $docid;
         else if ($documentType == DTYPE_SUBMISSION)
@@ -1176,14 +1175,12 @@ class Conference {
     // Paper search
     //
 
-    function _paperQuery_where($optarr, $field) {
+    static private function _cvt_numeric_set($optarr) {
         $ids = array();
-        foreach (mkarray($optarr) as $id)
-            if (($id = cvtint($id)) > 0)
-                $ids[] = "$field=$id";
-        if (is_array($optarr) && count($ids) == 0)
-            $ids[] = "$field=0";
-        return (count($ids) ? "(" . join(" or ", $ids) . ")" : "false");
+        foreach (mkarray($optarr) as $x)
+            if (($x = cvtint($x)) > 0)
+                $ids[] = $x;
+        return $ids;
     }
 
     function query_all_reviewer_preference() {
@@ -1227,7 +1224,6 @@ class Conference {
         //   "reviewerName"     Include reviewer names
         //   "commenterName"    Include commenter names
         //   "reviewer" => $cid Include reviewerConflictType/reviewerReviewType
-        //   "joins"            Table(s) to join
         //   "tags"             Include paperTags
         //   "tagIndex" => $tag Include tagIndex of named tag
         //   "tagIndex" => tag array -- include tagIndex, tagIndex1, ...
@@ -1236,9 +1232,9 @@ class Conference {
         //   "scores" => array(fields to score)
         //   "order" => $sql    $sql is SQL 'order by' clause (or empty)
 
-        $reviewerQuery = isset($options['myReviews']) || isset($options['allReviews']) || isset($options['myReviewRequests']) || isset($options['myReviewsOpt']) || isset($options['myOutstandingReviews']);
-        $allReviewerQuery = isset($options['allReviews']) || isset($options['allReviewScores']);
-        $scoresQuery = !$reviewerQuery && isset($options['allReviewScores']);
+        $reviewerQuery = isset($options["myReviews"]) || isset($options["allReviews"]) || isset($options["myReviewRequests"]) || isset($options["myReviewsOpt"]) || isset($options["myOutstandingReviews"]);
+        $allReviewerQuery = isset($options["allReviews"]) || isset($options["allReviewScores"]);
+        $scoresQuery = !$reviewerQuery && isset($options["allReviewScores"]);
         if (is_object($contact))
             $contactId = $contact->contactId;
         else {
@@ -1251,228 +1247,215 @@ class Conference {
             $reviewerContactId = $options["reviewer"];
         else
             $reviewerContactId = $contactId;
+        if (@$options["author"])
+            $myPaperReview = null;
+        else if ($allReviewerQuery)
+            $myPaperReview = "MyPaperReview";
+        else
+            $myPaperReview = "PaperReview";
+
+        // paper selection
+        $paperset = array();
+        if (isset($options["paperId"]))
+            $paperset[] = self::_cvt_numeric_set($options["paperId"]);
+        if (isset($options["reviewId"])) {
+            if (is_numeric($options["reviewId"])) {
+                $result = Dbl::qe("select paperId from PaperReview where reviewId=" . $options["reviewId"]);
+                $paperset[] = self::_cvt_numeric_set(edb_first_columns($result));
+            } else if (preg_match('/^(\d+)([A-Z][A-Z]?)$/i', $options["reviewId"], $m)) {
+                $result = Dbl::qe("select paperId from PaperReview where paperId=$m[1] and reviewOrdinal=" . parseReviewOrdinal($m[2]));
+                $paperset[] = self::_cvt_numeric_set(edb_first_columns($result));
+            } else
+                $paperset[] = array();
+        }
+        if (isset($options["commentId"])) {
+            $result = Dbl::qe("select paperId from PaperComment where commentId" . sql_in_numeric_set(self::_cvt_numeric_set($options["commentId"])));
+            $paperset[] = self::_cvt_numeric_set(edb_first_columns($result));
+        }
+        if (count($paperset) > 1)
+            $paperset = array(call_user_func_array("array_intersect", $paperset));
+        $papersel = "";
+        if (count($paperset))
+            $papersel = "paperId" . sql_in_numeric_set($paperset[0]) . " and ";
+
+        // prepare query: basic tables
         $where = array();
 
-        // fields
-        $pq = "select Paper.*, PaperConflict.conflictType,
-                count(AllReviews.reviewSubmitted) as reviewCount,
-                count(if(AllReviews.reviewNeedsSubmit<=0,AllReviews.reviewSubmitted,AllReviews.reviewId)) as startedReviewCount";
-        $myPaperReview = null;
-        if (!isset($options["author"])) {
-            if ($allReviewerQuery)
-                $myPaperReview = "MyPaperReview";
-            else
-                $myPaperReview = "PaperReview";
-            // see also papercolumn.php
-            $pq .= ",
-                PaperReview.reviewType,
-                PaperReview.reviewId,
-                PaperReview.reviewModified,
-                PaperReview.reviewSubmitted,
-                PaperReview.reviewNeedsSubmit,
-                PaperReview.reviewOrdinal,
-                PaperReview.reviewBlind,
-                PaperReview.reviewToken,
-                PaperReview.contactId as reviewContactId,
-                PaperReview.requestedBy,
-                max($myPaperReview.reviewType) as myReviewType,
-                max($myPaperReview.reviewSubmitted) as myReviewSubmitted,
-                min($myPaperReview.reviewNeedsSubmit) as myReviewNeedsSubmit,
-                $myPaperReview.contactId as myReviewContactId,
-                PaperReview.reviewRound";
-        } else
-            $pq .= ",\nnull reviewType, null reviewId, null myReviewType";
-        if (@$options["reviewerName"])
-            $pq .= ",
-                ReviewerContactInfo.firstName as reviewFirstName,
-                ReviewerContactInfo.lastName as reviewLastName,
-                ReviewerContactInfo.email as reviewEmail,
-                ReviewerContactInfo.lastLogin as reviewLastLogin";
-        if ($reviewerQuery || $scoresQuery) {
-            $pq .= ",\n\t\tPaperReview.reviewEditVersion as reviewEditVersion";
-            foreach (ReviewForm::field_list_all_rounds() as $f)
-                if ($reviewerQuery || $f->has_options)
-                    $pq .= ",\n\t\tPaperReview.$f->id as $f->id";
-        }
-        if (@$options["allComments"]) {
-            $pq .= ",
-                PaperComment.commentId,
-                PaperComment.contactId as commentContactId,
-                CommentConflict.conflictType as commentConflictType,
-                PaperComment.timeModified,
-                PaperComment.comment,
-                PaperComment.replyTo,
-                PaperComment.commentType";
-        }
-        if (@$options["topics"])
-            $pq .= ",
-                PaperTopics.topicIds,
-                PaperTopics.topicInterest";
-        if (@$options["options"] && @$this->settingTexts["options"])
-            $pq .= ",
-                PaperOptions.optionIds";
-        else if (@$options["options"])
-            $pq .= ",
-                '' as optionIds";
-        if (@$options["tags"])
-            $pq .= ",
-                PaperTags.paperTags";
-        if (@$options["tagIndex"] && !is_array($options["tagIndex"]))
-            $options["tagIndex"] = array($options["tagIndex"]);
-        if (@$options["tagIndex"])
-            for ($i = 0; $i < count($options["tagIndex"]); ++$i)
-                $pq .= ",\n\t\tTagIndex$i.tagIndex as tagIndex" . ($i?$i:"");
-        if (@$options["scores"]) {
-            foreach ($options["scores"] as $field) {
-                $pq .= ",\n             PaperScores.${field}Scores";
-                if ($myPaperReview)
-                    $pq .= ",\n         $myPaperReview.$field";
-            }
-            $pq .= ",\n         PaperScores.numScores";
-        }
-        if (@$options["reviewTypes"])
-            $pq .= ",\n         PaperScores.reviewTypes";
-        if (@$options["topicInterestScore"])
-            $pq .= ",
-                coalesce(PaperTopics.topicInterestScore, 0) as topicInterestScore";
-        if (@$options["reviewerPreference"]) {
-            $pq .= ",
-                coalesce(PaperReviewPreference.preference, 0) as reviewerPreference";
-            if ($this->sversion >= 69)
-                $pq .= ", PaperReviewPreference.expertise as reviewerExpertise";
-            else
-                $pq .= ", NULL as reviewerExpertise";
-        }
-        if (@$options["allReviewerPreference"])
-            $pq .= ",
-                APRP.allReviewerPreference";
-        if (@$options["desirability"])
-            $pq .= ",
-                coalesce(APRP.desirability, 0) as desirability";
-        if (@$options["allConflictType"])
-            $pq .= ",
-                AllConflict.allConflictType";
-        if (@$options["reviewer"])
-            $pq .= ",
-                RPC.conflictType reviewerConflictType, RPR.reviewType reviewerReviewType";
-        if (@$options["foldall"])
-            $pq .= ",
-                1 as folded";
+        $joins = array("Paper");
 
-        // tables
-        $pq .= "
-                from Paper\n";
-
-        if (@$options["reviewId"])
-            $pq .= "            join PaperReview as ReviewSelector on (ReviewSelector.paperId=Paper.paperId)\n";
-        if (@$options["commentId"])
-            $pq .= "            join PaperComment as CommentSelector on (CommentSelector.paperId=Paper.paperId)\n";
+        $cols = array("Paper.*, PaperConflict.conflictType");
 
         $aujoinwhere = null;
         if (@$options["author"] && $contact
             && ($aujoinwhere = $contact->actAuthorSql("PaperConflict", true)))
             $where[] = $aujoinwhere;
         if (@$options["author"] && !$aujoinwhere)
-            $pq .= "            join PaperConflict on (PaperConflict.paperId=Paper.paperId and PaperConflict.conflictType>=" . CONFLICT_AUTHOR . " and PaperConflict.contactId=$contactId)\n";
+            $joins[] = "join PaperConflict on (PaperConflict.paperId=Paper.paperId and PaperConflict.contactId=$contactId and PaperConflict.conflictType>=" . CONFLICT_AUTHOR . ")";
         else
-            $pq .= "            left join PaperConflict on (PaperConflict.paperId=Paper.paperId and PaperConflict.contactId=$contactId)\n";
+            $joins[] = "left join PaperConflict on (PaperConflict.paperId=Paper.paperId and PaperConflict.contactId=$contactId)";
 
-        if (@$options["joins"])
-            foreach ($options["joins"] as $jt)
-                $pq .= "                $jt\n";
-
-        $pq .= "                left join PaperReview as AllReviews on (AllReviews.paperId=Paper.paperId)\n";
-
+        // my review
         $qr = "";
         if ($contact && ($tokens = $contact->review_tokens()))
             $qr = " or PaperReview.reviewToken in (" . join(", ", $tokens) . ")";
         if (@$options["myReviewRequests"])
-            $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.requestedBy=$contactId and PaperReview.reviewType=" . REVIEW_EXTERNAL . ")\n";
+            $joins[] = "join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.requestedBy=$contactId and PaperReview.reviewType=" . REVIEW_EXTERNAL . ")";
         else if (@$options["myReviews"])
-            $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))\n";
+            $joins[] = "join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))";
         else if (@$options["myOutstandingReviews"])
-            $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr) and PaperReview.reviewNeedsSubmit!=0)\n";
+            $joins[] = "join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr) and PaperReview.reviewNeedsSubmit!=0)";
         else if (@$options["myReviewsOpt"])
-            $pq .= "            left join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))\n";
+            $joins[] = "left join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))";
         else if (@$options["allReviews"] || @$options["allReviewScores"]) {
             $x = (@$options["reviewLimitSql"] ? " and (" . $options["reviewLimitSql"] . ")" : "");
-            $pq .= "            join PaperReview on (PaperReview.paperId=Paper.paperId$x)\n";
+            $joins[] = "join PaperReview on (PaperReview.paperId=Paper.paperId$x)";
         } else if (!@$options["author"])
-            $pq .= "            left join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))\n";
-        if ($myPaperReview == "MyPaperReview")
-            $pq .= "            left join PaperReview as MyPaperReview on (MyPaperReview.paperId=Paper.paperId and MyPaperReview.contactId=$contactId)\n";
-        if (@$options["allComments"])
-            $pq .= "            join PaperComment on (PaperComment.paperId=Paper.paperId)
-                left join PaperConflict as CommentConflict on (CommentConflict.paperId=PaperComment.paperId and CommentConflict.contactId=PaperComment.contactId)\n";
+            $joins[] = "left join PaperReview on (PaperReview.paperId=Paper.paperId and (PaperReview.contactId=$contactId$qr))";
 
-        if (@$options["reviewerName"] === "lead" || @$options["reviewerName"] === "shepherd")
-            $pq .= "            left join ContactInfo as ReviewerContactInfo on (ReviewerContactInfo.contactId=Paper.{$options['reviewerName']}ContactId)\n";
-        else if (@$options["reviewerName"] && @$options["allComments"])
-            $pq .= "            left join ContactInfo as ReviewerContactInfo on (ReviewerContactInfo.contactId=PaperComment.contactId)\n";
-        else if (@$options["reviewerName"])
-            $pq .= "            left join ContactInfo as ReviewerContactInfo on (ReviewerContactInfo.contactId=PaperReview.contactId)\n";
+        // all reviews
+        $joins[] = "left join (select paperId, count(*) count from PaperReview where {$papersel}(reviewSubmitted or reviewNeedsSubmit>0) group by paperId) R_started on (R_started.paperId=Paper.paperId)";
+        $cols[] = "coalesce(R_started.count,0) startedReviewCount";
+
+        $j = "select paperId, count(*) count";
+        $cols[] = "coalesce(R_submitted.count,0) reviewCount";
+        if (@$options["scores"])
+            foreach ($options["scores"] as $fid) {
+                $cols[] = "R_submitted.{$fid}Scores";
+                if ($myPaperReview)
+                    $cols[] = "$myPaperReview.$fid";
+                $j .= ", group_concat($fid order by reviewId) {$fid}Scores";
+            }
+        if (@$options["reviewTypes"]) {
+            $cols[] = "R_submitted.reviewTypes";
+            $j .= ", group_concat(reviewType order by reviewId) reviewTypes";
+        }
+        if (@$options["reviewTypes"] || @$options["scores"]) {
+            $cols[] = "R_submitted.reviewContactIds";
+            $j .= ", group_concat(contactId order by reviewId) reviewContactIds";
+        }
+        $joins[] = "left join ($j from PaperReview where {$papersel}reviewSubmitted>0 group by paperId) R_submitted on (R_submitted.paperId=Paper.paperId)";
+
+        // fields
+        if (@$options["author"])
+            $cols[] = "null reviewType, null reviewId, null myReviewType";
+        else {
+            // see also papercolumn.php
+            array_push($cols, "PaperReview.reviewType, PaperReview.reviewId",
+                       "PaperReview.reviewModified, PaperReview.reviewSubmitted",
+                       "PaperReview.reviewNeedsSubmit, PaperReview.reviewOrdinal",
+                       "PaperReview.reviewBlind, PaperReview.reviewToken",
+                       "PaperReview.contactId as reviewContactId, PaperReview.requestedBy",
+                       "max($myPaperReview.reviewType) as myReviewType",
+                       "max($myPaperReview.reviewSubmitted) as myReviewSubmitted",
+                       "min($myPaperReview.reviewNeedsSubmit) as myReviewNeedsSubmit",
+                       "$myPaperReview.contactId as myReviewContactId",
+                       "PaperReview.reviewRound");
+        }
+
+        if ($reviewerQuery || $scoresQuery) {
+            $cols[] = "PaperReview.reviewEditVersion as reviewEditVersion";
+            foreach (ReviewForm::field_list_all_rounds() as $f)
+                if ($reviewerQuery || $f->has_options)
+                    $cols[] = "PaperReview.$f->id as $f->id";
+        }
+
+        if ($myPaperReview == "MyPaperReview")
+            $joins[] = "left join PaperReview as MyPaperReview on (MyPaperReview.paperId=Paper.paperId and MyPaperReview.contactId=$contactId)";
 
         if (@$options["topics"] || @$options["topicInterestScore"]) {
-            $pq .= "            left join (select paperId";
-            if (@$options["topics"])
-                $pq .= ", group_concat(PaperTopic.topicId) as topicIds, group_concat(ifnull(" . $this->query_topic_interest("TopicInterest.") . ",0)) as topicInterest";
-            if (@$options["topicInterestScore"])
-                $pq .= ", sum(" . $this->query_topic_interest_score() . ") as topicInterestScore";
-            $pq .= " from PaperTopic left join TopicInterest on (TopicInterest.topicId=PaperTopic.topicId and TopicInterest.contactId=$reviewerContactId) group by paperId) as PaperTopics on (PaperTopics.paperId=Paper.paperId)\n";
+            $j = "left join (select paperId";
+            if (@$options["topics"]) {
+                $j .= ", group_concat(PaperTopic.topicId) as topicIds, group_concat(ifnull(" . $this->query_topic_interest("TopicInterest.") . ",0)) as topicInterest";
+                $cols[] = "PaperTopics.topicIds, PaperTopics.topicInterest";
+            }
+            if (@$options["topicInterestScore"]) {
+                $j .= ", sum(" . $this->query_topic_interest_score() . ") as topicInterestScore";
+                $cols[] = "coalesce(PaperTopics.topicInterestScore,0) as topicInterestScore";
+            }
+            $j .= " from PaperTopic left join TopicInterest on (TopicInterest.topicId=PaperTopic.topicId and TopicInterest.contactId=$reviewerContactId) where {$papersel}true group by paperId) as PaperTopics on (PaperTopics.paperId=Paper.paperId)";
+            $joins[] = $j;
         }
 
-        if (@$options["options"] && @$this->settingTexts["options"])
-            $pq .= "            left join (select paperId, group_concat(PaperOption.optionId, '#', value) as optionIds from PaperOption group by paperId) as PaperOptions on (PaperOptions.paperId=Paper.paperId)\n";
+        if (@$options["options"] && @$this->settingTexts["options"]) {
+            $joins[] = "left join (select paperId, group_concat(PaperOption.optionId, '#', value) as optionIds from PaperOption where {$papersel}true group by paperId) as PaperOptions on (PaperOptions.paperId=Paper.paperId)";
+            $cols[] = "PaperOptions.optionIds";
+        } else if (@$options["options"])
+            $cols[] = "'' as optionIds";
 
-        if (@$options["tags"])
-            $pq .= "            left join (select paperId, group_concat(' ', tag, '#', tagIndex order by tag separator '') as paperTags from PaperTag group by paperId) as PaperTags on (PaperTags.paperId=Paper.paperId)\n";
+        if (@$options["tags"]) {
+            $joins[] = "left join (select paperId, group_concat(' ', tag, '#', tagIndex order by tag separator '') as paperTags from PaperTag where {$papersel}true group by paperId) as PaperTags on (PaperTags.paperId=Paper.paperId)";
+            $cols[] = "PaperTags.paperTags";
+        }
+        if (@$options["tagIndex"] && !is_array($options["tagIndex"]))
+            $options["tagIndex"] = array($options["tagIndex"]);
         if (@$options["tagIndex"])
-            for ($i = 0; $i < count($options["tagIndex"]); ++$i)
-                $pq .= "                left join PaperTag as TagIndex$i on (TagIndex$i.paperId=Paper.paperId and TagIndex$i.tag='" . sqlq($options["tagIndex"][$i]) . "')\n";
+            for ($i = 0; $i < count($options["tagIndex"]); ++$i) {
+                $joins[] = "left join PaperTag as TagIndex$i on (TagIndex$i.paperId=Paper.paperId and TagIndex$i.tag='" . sqlq($options["tagIndex"][$i]) . "')";
+                $cols[] = "TagIndex$i.tagIndex as tagIndex" . ($i ? : "");
+            }
 
-        if (@$options["scores"] || @$options["reviewTypes"]) {
-            $pq .= "            left join (select paperId";
-            if (@$options["scores"])
-                foreach ($options["scores"] as $field)
-                    $pq .= ", group_concat($field) as ${field}Scores";
-            if (@$options["reviewTypes"])
-                $pq .= ", group_concat(reviewType) as reviewTypes";
-            $pq .= ", count(*) as numScores";
-            $pq .= " from PaperReview where reviewSubmitted>0 group by paperId) as PaperScores on (PaperScores.paperId=Paper.paperId)\n";
+        if (@$options["reviewerPreference"]) {
+            $joins[] = "left join PaperReviewPreference on (PaperReviewPreference.paperId=Paper.paperId and PaperReviewPreference.contactId=$reviewerContactId)";
+            $cols[] = "coalesce(PaperReviewPreference.preference, 0) as reviewerPreference";
+            if ($this->sversion >= 69)
+                $cols[] = "PaperReviewPreference.expertise as reviewerExpertise";
+            else
+                $cols[] = "NULL as reviewerExpertise";
         }
 
-        if (@$options["reviewerPreference"])
-            $pq .= "            left join PaperReviewPreference on (PaperReviewPreference.paperId=Paper.paperId and PaperReviewPreference.contactId=$reviewerContactId)\n";
         if (@$options["allReviewerPreference"] || @$options["desirability"]) {
             $subq = "select paperId";
-            if (@$options["allReviewerPreference"])
+            if (@$options["allReviewerPreference"]) {
                 $subq .= ", " . $this->query_all_reviewer_preference() . " as allReviewerPreference";
-            if (@$options["desirability"])
+                $cols[] = "APRP.allReviewerPreference";
+            }
+            if (@$options["desirability"]) {
                 $subq .= ", sum(if(preference<=-100,0,greatest(least(preference,1),-1))) as desirability";
-            $subq .= " from PaperReviewPreference group by paperId";
-            $pq .= "            left join ($subq) as APRP on (APRP.paperId=Paper.paperId)\n";
+                $cols[] = "coalesce(APRP.desirability,0) as desirability";
+            }
+            $subq .= " from PaperReviewPreference where {$papersel}true group by paperId";
+            $joins[] = "left join ($subq) as APRP on (APRP.paperId=Paper.paperId)";
         }
-        if (@$options["allConflictType"])
-            $pq .= "            left join (select paperId, group_concat(concat(contactId,' ',conflictType) separator ',') as allConflictType from PaperConflict where conflictType>0 group by paperId) as AllConflict on (AllConflict.paperId=Paper.paperId)\n";
-        if (@$options["reviewer"])
-            $pq .= "            left join PaperConflict RPC on (RPC.paperId=Paper.paperId and RPC.contactId=$reviewerContactId)
-                left join PaperReview RPR on (RPR.paperId=Paper.paperId and RPR.contactId=$reviewerContactId)\n";
 
+        if (@$options["allConflictType"]) {
+            $joins[] = "left join (select paperId, group_concat(concat(contactId,' ',conflictType) separator ',') as allConflictType from PaperConflict where {$papersel}conflictType>0 group by paperId) as AllConflict on (AllConflict.paperId=Paper.paperId)";
+            $cols[] = "AllConflict.allConflictType";
+        }
+
+        if (@$options["reviewer"]) {
+            $joins[] = "left join PaperConflict RPC on (RPC.paperId=Paper.paperId and RPC.contactId=$reviewerContactId)";
+            $joins[] = "left join PaperReview RPR on (RPR.paperId=Paper.paperId and RPR.contactId=$reviewerContactId)";
+            $cols[] = "RPC.conflictType reviewerConflictType, RPR.reviewType reviewerReviewType";
+        }
+
+        if (@$options["allComments"]) {
+            $joins[] = "join PaperComment on (PaperComment.paperId=Paper.paperId)";
+            $joins[] = "left join PaperConflict as CommentConflict on (CommentConflict.paperId=PaperComment.paperId and CommentConflict.contactId=PaperComment.contactId)";
+            array_push($cols, "PaperComment.commentId, PaperComment.contactId as commentContactId",
+                       "CommentConflict.conflictType as commentConflictType",
+                       "PaperComment.timeModified, PaperComment.comment",
+                       "PaperComment.replyTo, PaperComment.commentType");
+        }
+
+        if (@$options["reviewerName"]) {
+            if (@$options["reviewerName"] === "lead" || @$options["reviewerName"] === "shepherd")
+                $joins[] = "left join ContactInfo as ReviewerContactInfo on (ReviewerContactInfo.contactId=Paper.{$options['reviewerName']}ContactId)";
+            else if (@$options["allComments"])
+                $joins[] = "left join ContactInfo as ReviewerContactInfo on (ReviewerContactInfo.contactId=PaperComment.contactId)";
+            else if (@$options["reviewerName"])
+                $joins[] = "left join ContactInfo as ReviewerContactInfo on (ReviewerContactInfo.contactId=PaperReview.contactId)";
+            array_push($cols, "ReviewerContactInfo.firstName as reviewFirstName",
+                       "ReviewerContactInfo.lastName as reviewLastName",
+                       "ReviewerContactInfo.email as reviewEmail",
+                       "ReviewerContactInfo.lastLogin as reviewLastLogin");
+        }
+
+        if (@$options["foldall"])
+            $cols[] = "1 as folded";
 
         // conditions
-        if (@$options["paperId"])
-            $where[] = $this->_paperQuery_where($options["paperId"], "Paper.paperId");
-        if (@$options["reviewId"]) {
-            if (is_numeric($options["reviewId"]))
-                $where[] = $this->_paperQuery_where($options["reviewId"], "ReviewSelector.reviewId");
-            else if (preg_match('/^(\d+)([A-Z][A-Z]?)$/i', $options["reviewId"], $m)) {
-                $where[] = $this->_paperQuery_where($m[1], "Paper.paperId");
-                $where[] = $this->_paperQuery_where(parseReviewOrdinal($m[2]), "ReviewSelector.reviewOrdinal");
-            } else
-                $where[] = $this->_paperQuery_where(-1, "Paper.paperId");
-        }
-        if (@$options["commentId"])
-            $where[] = $this->_paperQuery_where($options['commentId'], "CommentSelector.commentId");
+        if (count($paperset))
+            $where[] = "Paper.paperId" . sql_in_numeric_set($paperset[0]);
         if (@$options["finalized"])
             $where[] = "timeSubmitted>0";
         else if (@$options["unsub"])
@@ -1489,27 +1472,29 @@ class Conference {
         if (@$options["unmanaged"])
             $where[] = "managerContactId=0";
 
+        $pq = "select " . join(",\n    ", $cols)
+            . "\nfrom " . join("\n    ", $joins);
         if (count($where))
-            $pq .= "            where " . join(" and ", $where) . "\n";
+            $pq .= "\nwhere " . join("\n    and ", $where);
 
         // grouping and ordering
         if (@$options["allComments"])
-            $pq .= "            group by Paper.paperId, PaperComment.commentId\n";
+            $pq .= "\ngroup by Paper.paperId, PaperComment.commentId";
         else if ($reviewerQuery || $scoresQuery)
-            $pq .= "            group by Paper.paperId, PaperReview.reviewId\n";
+            $pq .= "\ngroup by Paper.paperId, PaperReview.reviewId";
         else
-            $pq .= "            group by Paper.paperId\n";
+            $pq .= "\ngroup by Paper.paperId";
         if (@$options["order"] && $options["order"] != "order by Paper.paperId")
-            $pq .= "            " . $options["order"];
+            $pq .= "\n" . $options["order"];
         else {
-            $pq .= "            order by Paper.paperId";
+            $pq .= "\norder by Paper.paperId";
             if ($reviewerQuery || $scoresQuery)
                 $pq .= ", PaperReview.reviewOrdinal";
             if (isset($options["allComments"]))
                 $pq .= ", PaperComment.commentId";
         }
 
-        //$this->infoMsg("<pre>" . htmlspecialchars($pq) . "</pre>");
+        //$this->infoMsg(Ht::pre_text_wrap($pq));
         return $pq . "\n";
     }
 
@@ -1560,8 +1545,6 @@ class Conference {
         $result = $this->qe($q);
         $crows = array();
         while (($row = PaperInfo::fetch($result, $contact))) {
-            if (!isset($row->commentType))
-                setCommentType($row);
             $crows[$row->commentId] = $row;
             if (isset($row->commentContactId))
                 $cid = $row->commentContactId;
@@ -1946,9 +1929,9 @@ class Conference {
         if (isset($Opt["jqueryURL"]))
             $jquery = $Opt["jqueryURL"];
         else if (@$Opt["jqueryCDN"])
-            $jquery = "//code.jquery.com/jquery-1.11.1.min.js";
+            $jquery = "//code.jquery.com/jquery-1.11.2.min.js";
         else
-            $jquery = $Opt["assetsURL"] . "scripts/jquery-1.11.1.min.js";
+            $jquery = $Opt["assetsURL"] . "scripts/jquery-1.11.2.min.js";
         $this->scriptStuff = Ht::script_file($jquery) . "\n";
 
         // Javascript settings to set before script.js
@@ -2028,11 +2011,11 @@ class Conference {
 
         echo "<div id='prebody'>\n";
 
-        echo "<div id='header'>\n<div id='header_left_conf'><h1>";
+        echo "<div id='header'>\n<div id='header_site'><h1>";
         if ($title && $showTitle && $title == "Home")
             echo "<a class='q' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a>";
         else
-            echo "<a class='x' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a></h1></div><div id='header_left_page'><h1>", $title;
+            echo "<a class='x' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a></h1></div><div id='header_page'><h1>", $title;
         echo "</h1></div><div id='header_right'>";
         if ($Me && !$Me->is_empty()) {
             // profile link

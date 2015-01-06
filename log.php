@@ -214,7 +214,7 @@ while (($row = edb_orow($result)) && ($n < $count || $page === false)) {
         $t .= "<a href=\"" . hoturl("profile", "u=" . urlencode($row->email)) . "\">"
             . Text::user_html_nolink($row) . "</a>";
         if ($row->contactId !== $Me->contactId)
-            $t .= "&nbsp;" . viewas_link($row);
+            $t .= "&nbsp;" . actas_link($row);
     } else if ($row->firstName || $row->lastName)
         $t .= Text::user_html_nolink($row);
     else if ($row->contactId)
@@ -259,7 +259,6 @@ if (count($trs)) {
     <th class='pl_name'>Account</th>
     <th class='al_act'>Action</th>
   </tr></thead>
-  <tfoot><tr class='pl_footgap k", (count($trs) - 1) % 2, "'><td colspan='5'></td></tr></tfoot>
   <tbody>\n";
     for ($i = 0; $i < count($trs); ++$i)
         echo "    <tr class='k", $i % 2, " al'>", $trs[$i], "</tr>\n";

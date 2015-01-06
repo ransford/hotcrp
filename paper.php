@@ -125,14 +125,10 @@ if (isset($_REQUEST["checkformat"]) && $prow && $Conf->setting("sub_banal")) {
 // withdraw and revive actions
 if (isset($_REQUEST["withdraw"]) && !$newPaper && check_post()) {
     if ($Me->canWithdrawPaper($prow, $whyNot)) {
-        $q = "update Paper set timeWithdrawn=" . time()
-            . ", timeSubmitted=if(timeSubmitted>0,-100,0)";
         $reason = defval($_REQUEST, "reason", "");
         if ($reason == "" && $Me->privChair && defval($_REQUEST, "doemail") > 0)
             $reason = defval($_REQUEST, "emailNote", "");
-        if ($Conf->sversion >= 44 && $reason != "")
-            $q .= ", withdrawReason='" . sqlq($reason) . "'";
-        $Conf->qe($q . " where paperId=$paperId");
+        Dbl::qe("update Paper set timeWithdrawn=$Now, timeSubmitted=if(timeSubmitted>0,-100,0), withdrawReason=? where paperId=$paperId", $reason != "" ? $reason : null);
         $result = Dbl::qe("update PaperReview set reviewNeedsSubmit=0 where paperId=$paperId");
         $numreviews = $result ? $result->affected_rows : false;
         $Conf->updatePapersubSetting(false);
@@ -163,10 +159,7 @@ if (isset($_REQUEST["withdraw"]) && !$newPaper && check_post()) {
 }
 if (isset($_REQUEST["revive"]) && !$newPaper && check_post()) {
     if ($Me->canRevivePaper($prow, $whyNot)) {
-        $q = "update Paper set timeWithdrawn=0, timeSubmitted=if(timeSubmitted=-100," . time() . ",0)";
-        if ($Conf->sversion >= 44)
-            $q .= ", withdrawReason=null";
-        $Conf->qe($q . " where paperId=$paperId");
+        Dbl::qe("update Paper set timeWithdrawn=0, timeSubmitted=if(timeSubmitted=-100,$Now,0), withdrawReason=null where paperId=$paperId");
         $Conf->qe("update PaperReview set reviewNeedsSubmit=1 where paperId=$paperId and reviewSubmitted is null");
         $Conf->qe("update PaperReview join PaperReview as Req on (Req.paperId=$paperId and Req.requestedBy=PaperReview.contactId and Req.reviewType=" . REVIEW_EXTERNAL . ") set PaperReview.reviewNeedsSubmit=-1 where PaperReview.paperId=$paperId and PaperReview.reviewSubmitted is null and PaperReview.reviewType=" . REVIEW_SECONDARY);
         $Conf->qe("update PaperReview join PaperReview as Req on (Req.paperId=$paperId and Req.requestedBy=PaperReview.contactId and Req.reviewType=" . REVIEW_EXTERNAL . " and Req.reviewSubmitted>0) set PaperReview.reviewNeedsSubmit=0 where PaperReview.paperId=$paperId and PaperReview.reviewSubmitted is null and PaperReview.reviewType=" . REVIEW_SECONDARY);
@@ -605,7 +598,7 @@ function update_paper($Me, $isSubmit, $isSubmitFinal, $diffs) {
     if (!$newPaper)
         $Conf->qe("update Paper set " . join(", ", $q) . " where paperId=$paperId and timeWithdrawn<=0");
     else {
-        if (!($result = Dbl::real_qe("insert into Paper set " . join(", ", $q)))) {
+        if (!($result = Dbl::qe_raw("insert into Paper set " . join(", ", $q)))) {
             $Conf->errorMsg("Could not create paper.");
             return false;
         }
@@ -761,7 +754,7 @@ function update_paper($Me, $isSubmit, $isSubmitFinal, $diffs) {
     }
 
     // other mail confirmations
-    if ($isSubmitFinal && $OK && !count($Error) && $Conf->sversion >= 36)
+    if ($isSubmitFinal && $OK && !count($Error))
         genericWatch($prow, WATCHTYPE_FINAL_SUBMIT, "final_submit_watch_callback", $Me);
 
     $Me->log_activity($actiontext, $paperId);

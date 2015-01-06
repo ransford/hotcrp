@@ -9,13 +9,13 @@ require_once("$ConfSitePATH/src/baselist.php");
 class PaperList extends BaseList {
 
     // creator can set to change behavior
-    public $papersel;
+    public $papersel = null;
     public $display;
 
     // columns access
-    public $sorters;
+    public $sorters = array();
     public $contact;
-    public $scoresOk;
+    public $scoresOk = false;
     public $search;
     public $tagger;
     public $reviewer;
@@ -35,13 +35,13 @@ class PaperList extends BaseList {
     public $count;
     public $ids;
     public $any;
+    public $error_html = array();
 
     function __construct($search, $args = array()) {
         global $Conf;
         $this->search = $search;
 
         $this->sortable = !!@$args["sort"];
-        $this->sorters = array();
         if ($this->sortable && is_string($args["sort"]))
             $this->sorters[] = BaseList::parse_sorter($args["sort"]);
         else if ($this->sortable && isset($_REQUEST["sort"]))
@@ -60,8 +60,6 @@ class PaperList extends BaseList {
         } else
             $this->listNumber = 0;
 
-        $this->scoresOk = false;
-        $this->papersel = null;
         if (is_string(defval($args, "display", null)))
             $this->display = " " . $args["display"] . " ";
         else {
@@ -299,7 +297,7 @@ class PaperList extends BaseList {
         return $t;
     }
 
-    private function _footer($ncol, $listname, $trclass, $extra) {
+    private function _footer($ncol, $listname, $rstate, $extra) {
         global $Conf;
         if ($this->count == 0)
             return "";
@@ -477,9 +475,9 @@ class PaperList extends BaseList {
             $Conf->footerScript("plactions_dofold()");
 
         // Linelinks container
-        $foot = " <tfoot>\n"
-            . "  <tr class='pl_footgap $trclass'><td colspan='$ncol'><div class='pl_footgap'></div></td></tr>\n"
-            . "  <tr class='pl_footrow'>\n";
+        $foot = " <tfoot"
+            . ($rstate->hascolors ? " class=\"pltable_colored\"" : "")
+            . ">\n  <tr class=\"pl_footrow\">\n";
         if ($this->viewmap->columns)
             $foot .= "    <td class='pl_footer' colspan='$ncol'>";
         else
@@ -524,10 +522,10 @@ class PaperList extends BaseList {
             return "id title statusfull";
         case "s":
         case "acc":
-            return "sel id title revtype revstat status authors abstract tags tagreports topics collab reviewers allrevpref pcconf lead shepherd scores formulas";
+            return "sel id title revtype revstat status authors collab abstract tags tagreports topics reviewers allrevpref pcconf lead shepherd scores formulas";
         case "all":
         case "act":
-            return "sel id title statusfull revtype authors abstract tags tagreports topics collab reviewers allrevpref pcconf lead shepherd scores formulas";
+            return "sel id title statusfull revtype authors collab abstract tags tagreports topics reviewers allrevpref pcconf lead shepherd scores formulas";
         case "reviewerHome":
             $this->_default_linkto("review");
             return "id title revtype status";
@@ -535,16 +533,16 @@ class PaperList extends BaseList {
         case "lead":
         case "manager":
             $this->_default_linkto("review");
-            return "sel id title revtype revstat status authors abstract tags tagreports topics collab reviewers allrevpref pcconf lead shepherd scores formulas";
+            return "sel id title revtype revstat status authors collab abstract tags tagreports topics reviewers allrevpref pcconf lead shepherd scores formulas";
         case "rout":
             $this->_default_linkto("review");
-            return "sel id title revtype revstat status authors abstract tags tagreports topics collab reviewers allrevpref pcconf lead shepherd scores formulas";
+            return "sel id title revtype revstat status authors collab abstract tags tagreports topics reviewers allrevpref pcconf lead shepherd scores formulas";
         case "req":
             $this->_default_linkto("review");
-            return "sel id title revtype revstat status authors abstract tags tagreports topics collab reviewers allrevpref pcconf lead shepherd scores formulas";
+            return "sel id title revtype revstat status authors collab abstract tags tagreports topics reviewers allrevpref pcconf lead shepherd scores formulas";
         case "reqrevs":
             $this->_default_linkto("review");
-            return "id title revdelegation revsubmitted revstat status authors abstract tags tagreports topics collab reviewers allrevpref pcconf lead shepherd scores formulas";
+            return "id title revdelegation revsubmitted revstat status authors collab abstract tags tagreports topics reviewers allrevpref pcconf lead shepherd scores formulas";
         case "reviewAssignment":
             $this->_default_linkto("assign");
             return "id title revpref topicscore desirability assrev authors tags topics reviewers allrevtopicpref authorsmatch collabmatch scores formulas";
@@ -706,7 +704,7 @@ class PaperList extends BaseList {
         foreach ($fieldDef as $fdef) {
             if ($fdef->view != Column::VIEW_COLUMN)
                 continue;
-            $td = "    <td class=\"pl_$fdef->cssname";
+            $td = "    <td class=\"pl pl_$fdef->cssname";
             if ($fdef->foldable)
                 $td .= " fx$fdef->foldable";
             if ($fdef->content_empty($this, $row)) {
@@ -769,7 +767,7 @@ class PaperList extends BaseList {
             $t .= "  <tr class=\"plx $trclass\" hotcrpid=\"$row->paperId\">";
             if ($rstate->skipcallout > 0)
                 $t .= "<td colspan=\"$rstate->skipcallout\"></td>";
-            $t .= "<td colspan=\"" . ($rstate->ncol - $rstate->skipcallout) . "\">$tt</td></tr>\n";
+            $t .= "<td class=\"plx\" colspan=\"" . ($rstate->ncol - $rstate->skipcallout) . "\">$tt</td></tr>\n";
         }
 
         return $t;
@@ -877,10 +875,10 @@ class PaperList extends BaseList {
         $rownum_marker = "<span class=\"pl_rownum fx6\">";
         $rownum_len = strlen($rownum_marker);
         $nbody = array("<tr>");
-        $tbody = $rstate->hascolors ? ' class="pltable_colored"' : '';
+        $tbody_class = "pltable" . ($rstate->hascolors ? " pltable_colored" : "");
         for ($i = 1; $i < count($rstate->headingstart); ++$i) {
-            $nbody[] = '<td class="pl_splitcol top" width="' . (100 / $rstate->split_ncol) . '%"><div class="pl_splitcol"><table width="100%">';
-            $nbody[] = $colhead . "  <tbody$tbody>\n";
+            $nbody[] = '<td class="plsplit_col top" width="' . (100 / $rstate->split_ncol) . '%"><div class="plsplit_col"><table width="100%">';
+            $nbody[] = $colhead . "  <tbody class=\"$tbody_class\">\n";
             $number = 1;
             for ($j = $rstate->headingstart[$i - 1]; $j < $rstate->headingstart[$i]; ++$j) {
                 $x = $body[$j];
@@ -899,7 +897,7 @@ class PaperList extends BaseList {
         $nbody[] = "</tr>";
 
         $body = $nbody;
-        $rstate->last_trclass = "pl_splitcol";
+        $rstate->last_trclass = "plsplit_col";
         return true;
     }
 
@@ -913,12 +911,9 @@ class PaperList extends BaseList {
             || $this->contact->is_reviewer()
             || $Conf->timeAuthorViewReviews();
 
-        $this->query_options = array("joins" => array());
-        if ($this->search->complexSearch($this->query_options)) {
-            if (!($table = $this->search->matchTable()))
-                return false;
-            $this->query_options["joins"][] = "join $table on (Paper.paperId=$table.paperId)";
-        }
+        $this->query_options = array();
+        if ($this->search->complexSearch($this->query_options))
+            $this->query_options["paperId"] = $this->search->paperList();
         // NB that actually processed the search, setting PaperSearch::viewmap
 
         $this->viewmap = new Qobject($this->search->viewmap);
@@ -939,10 +934,16 @@ class PaperList extends BaseList {
         foreach ($this->viewmap as $k => $v)
             if (!isset($specials[$k])) {
                 $f = null;
+                $err = new PaperColumnErrors;
                 if ($v === "edit")
                     $f = PaperColumn::lookup("edit$k");
                 if (!$f)
-                    $f = PaperColumn::lookup($k);
+                    $f = PaperColumn::lookup($k, $err);
+                if (!$f && count($err->error_html)) {
+                    $err->error_html[0] = "Can’t show “" . htmlspecialchars($k) . "”: " . $err->error_html[0];
+                    $this->error_html = array_merge($this->error_html, $err->error_html);
+                } else if (!$f)
+                    $this->error_html[] = "No such column “" . htmlspecialchars($k) . "”.";
                 if ($f && $f->name != $k)
                     $viewmap_add[$f->name] = $v;
                 foreach ($field_list as $ff)
@@ -1138,7 +1139,7 @@ class PaperList extends BaseList {
         // header cells
         $url = $this->search->url_site_relative_raw();
         if (!defval($options, "noheader")) {
-            $colhead .= " <thead>\n  <tr class=\"pl_headrow\">\n";
+            $colhead .= " <thead class=\"pltable\">\n  <tr class=\"pl_headrow\">\n";
             $ord = 0;
             $titleextra = $this->_make_title_header_extra($rstate, $fieldDef,
                                                           defval($options, "header_links"));
@@ -1154,10 +1155,10 @@ class PaperList extends BaseList {
                 if ($fdef->view != Column::VIEW_COLUMN)
                     continue;
                 if (!$this->any[$fdef->name]) {
-                    $colhead .= "    <th class=\"pl_$fdef->cssname\"></th>\n";
+                    $colhead .= "    <th class=\"pl pl_$fdef->cssname\"></th>\n";
                     continue;
                 }
-                $colhead .= "    <th class=\"pl_$fdef->cssname";
+                $colhead .= "    <th class=\"pl pl_$fdef->cssname";
                 if ($fdef->foldable)
                     $colhead .= " fx" . $fdef->foldable;
                 $colhead .= "\">";
@@ -1192,9 +1193,7 @@ class PaperList extends BaseList {
                 $colhead .= "</th>\n";
             }
 
-            $colhead .= "  </tr>\n"
-                . "  <tr><td class='pl_headgap' colspan='$ncol'></td></tr>\n"
-                . " </thead>\n";
+            $colhead .= "  </tr>\n </thead>\n";
         }
 
         // table skeleton including fold classes
@@ -1211,23 +1210,23 @@ class PaperList extends BaseList {
         $exit = "</table>";
 
         // maybe make columns, maybe not
+        $tbody_class = "pltable";
         if ($this->viewmap->columns && count($rstate->ids)
             && $this->_column_split($rstate, $colhead, $body)) {
-            $enter = '<div class="pl_splitcol_ctr_ctr"><div class="pl_splitcol_ctr">' . $enter;
+            $enter = '<div class="plsplit_col_ctr_ctr"><div class="plsplit_col_ctr">' . $enter;
             $exit = $exit . "</div></div>";
             $ncol = $rstate->split_ncol;
-            $tbody = "";
         } else {
             $enter .= $colhead;
-            $tbody = $rstate->hascolors ? ' class="pltable_colored"' : '';
+            $tbody_class .= $rstate->hascolors ? " pltable_colored" : "";
         }
 
         if ($fieldDef[0] instanceof SelectorPaperColumn
             && !defval($options, "nofooter"))
-            $enter .= $this->_footer($ncol, $listname, $rstate->last_trclass,
+            $enter .= $this->_footer($ncol, $listname, $rstate,
                                      defval($options, "footer_extra", ""));
 
-        $x = $enter . " <tbody$tbody>\n" . join("", $body) . " </tbody>\n" . $exit;
+        $x = $enter . " <tbody class=\"$tbody_class\">\n" . join("", $body) . " </tbody>\n" . $exit;
 
         // session variable to remember the list
         if ($this->listNumber) {

@@ -130,7 +130,7 @@ if (isset($_REQUEST["unsubmitreview"]) && $paperTable->editrrow
         else if ($row && $row[1])
             $needsSubmit = -1;
     }
-    $result = $Conf->qe("update PaperReview set reviewSubmitted=null, reviewNeedsSubmit=$needsSubmit where reviewId=" . $paperTable->editrrow->reviewId);
+    $result = Dbl::qe("update PaperReview set reviewSubmitted=null, reviewNeedsSubmit=$needsSubmit where reviewId=" . $paperTable->editrrow->reviewId);
     $Conf->qe("unlock tables");
     if ($result) {
         $Me->log_activity("$editRrowLogname unsubmitted", $prow);
@@ -259,7 +259,7 @@ function downloadForm($editable) {
         $paperTable->resolveComments();
         foreach ($paperTable->crows as $cr)
             if ($Me->canViewComment($prow, $cr, false))
-                $text .= CommentView::unparse_text($prow, $cr, $Me) . "\n";
+                $text .= $cr->unparse_text($Me, true) . "\n";
     }
     if (!$text)
         return $Conf->errorMsg(whyNotText($whyNot, "review"));

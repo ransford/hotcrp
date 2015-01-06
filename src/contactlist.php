@@ -26,6 +26,8 @@ class ContactList extends BaseList {
     const FIELD_SHEPHERDS = 14;
     const FIELD_TAGS = 15;
     const FIELD_COLLABORATORS = 16;
+    const FIELD_SCORE = 50;
+    const FIELD_NUMSCORES = 11;
 
     public static $folds = array("topics", "aff", "tags", "collab");
 
@@ -168,34 +170,40 @@ class ContactList extends BaseList {
         return $x ? $x : self::_sortBase($a, $b);
     }
 
+    function _sortScores($a, $b) {
+        $x = $b->_sort_info - $a->_sort_info;
+        $x = $x ? : $b->_sort_avg - $a->_sort_avg;
+        return $x ? ($x < 0 ? -1 : 1) : self::_sortBase($a, $b);
+    }
+
     function _sort($rows) {
         global $Conf, $reviewScoreNames;
         switch (self::_normalizeField($this->sortField)) {
         case self::FIELD_EMAIL:
-            usort($rows, array("ContactList", "_sortEmail"));
+            usort($rows, array($this, "_sortEmail"));
             break;
         case self::FIELD_AFFILIATION:
         case self::FIELD_AFFILIATION_ROW:
-            usort($rows, array("ContactList", "_sortAffiliation"));
+            usort($rows, array($this, "_sortAffiliation"));
             break;
         case self::FIELD_LASTVISIT:
-            usort($rows, array("ContactList", "_sortLastVisit"));
+            usort($rows, array($this, "_sortLastVisit"));
             break;
         case self::FIELD_REVIEWS:
-            usort($rows, array("ContactList", "_sortReviews"));
+            usort($rows, array($this, "_sortReviews"));
             break;
         case self::FIELD_LEADS:
-            usort($rows, array("ContactList", "_sortLeads"));
+            usort($rows, array($this, "_sortLeads"));
             break;
         case self::FIELD_SHEPHERDS:
-            usort($rows, array("ContactList", "_sortShepherds"));
+            usort($rows, array($this, "_sortShepherds"));
             break;
         case self::FIELD_REVIEW_RATINGS:
-            usort($rows, array("ContactList", "_sortReviewRatings"));
+            usort($rows, array($this, "_sortReviewRatings"));
             break;
         case self::FIELD_PAPERS:
         case self::FIELD_REVIEW_PAPERS:
-            usort($rows, array("ContactList", "_sortPapers"));
+            usort($rows, array($this, "_sortPapers"));
             break;
         case self::FIELD_SCORE:
             $scoreName = $reviewScoreNames[$this->sortField - self::FIELD_SCORE];
@@ -203,9 +211,12 @@ class ContactList extends BaseList {
             $scoresort = $Conf->session("pplscoresort", "A");
             if ($scoresort != "A" && $scoresort != "V" && $scoresort != "D")
                 $scoresort = "A";
-            foreach ($rows as $row)
-                $this->score_analyze($row, $scoreName, $scoreMax, $scoresort);
-            $this->score_sort($rows, $scoresort);
+            foreach ($rows as $row) {
+                $scoreinfo = new ScoreInfo(@$row->$scoreName);
+                $row->_sort_info = $scoreinfo->sort_data($scoresort);
+                $row->_sort_avg = $scoreinfo->average();
+            }
+            usort($rows, array($this, "_sortScores"));
             break;
         }
         if ($this->reverseSort)
@@ -442,7 +453,7 @@ class ContactList extends BaseList {
         case "pcadmin":
             return $this->addScores(array($listname, self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_COLLABORATORS, self::FIELD_HIGHTOPICS, self::FIELD_LOWTOPICS, self::FIELD_REVIEWS, self::FIELD_REVIEW_RATINGS, self::FIELD_LEADS, self::FIELD_SHEPHERDS));
         case "pcadminx":
-            return array($listname, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION, self::FIELD_LASTVISIT, self::FIELD_COLLABORATORS, self::FIELD_HIGHTOPICS, self::FIELD_LOWTOPICS);
+            return array($listname, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_COLLABORATORS, self::FIELD_HIGHTOPICS, self::FIELD_LOWTOPICS);
           case "re":
           case "resub":
             return $this->addScores(array($listname, self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION, self::FIELD_LASTVISIT, self::FIELD_COLLABORATORS, self::FIELD_HIGHTOPICS, self::FIELD_LOWTOPICS, self::FIELD_REVIEWS, self::FIELD_REVIEW_RATINGS));
@@ -629,8 +640,6 @@ class ContactList extends BaseList {
             return NULL;
 
         // fetch data
-        if (edb_nrows($result) == 0)
-            return array();
         $rows = array();
         while (($row = edb_orow($result)))
             $rows[] = $row;
@@ -713,7 +722,7 @@ class ContactList extends BaseList {
                 continue;
 
             $trclass = "k" . ($this->count % 2);
-            if ($this->contact->isPC) {
+            if ($show_colors) {
                 $tags = Contact::roles_all_contact_tags($row->roles, $row->contactTags);
                 if (($c = TagInfo::color_classes($tags)))
                     $trclass .= " " . $c;
@@ -732,7 +741,7 @@ class ContactList extends BaseList {
                     //$t .= "  <tr class=\"pl_$fdef[0] pl_callout $trclass";
                     if ($fdef[1] >= 3)
                         $tt .= " class=\"fx" . ($fdef[1] - 2) . "\"";
-                    $tt .= "\"><h6>" . $this->header($fieldId, -1, $row)
+                    $tt .= "><h6>" . $this->header($fieldId, -1, $row)
                         . ":</h6> " . $d . "</div>";
                 }
 
@@ -819,7 +828,6 @@ class ContactList extends BaseList {
 
         $x .= $body;
 
-        $x .= "  <tr class='pl_footgap $trclass'><td class='pl_blank' colspan='$ncol'></td></tr>\n";
         reset($fieldDef);
         if (key($fieldDef) == self::FIELD_SELECTOR)
             $x .= $this->footer($ncol);

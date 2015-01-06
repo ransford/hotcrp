@@ -25,6 +25,10 @@ class HotCRPMailer extends Mailer {
         $this->reset($recipient, $row, $rest);
     }
 
+    static private function make_reviewer_contact($x) {
+        return (object) array("email" => @$x->reviewEmail, "firstName" => @$x->reviewFirstName, "lastName" => @$x->reviewLastName);
+    }
+
     function reset($recipient = null, $row = null, $rest = array()) {
         global $Me, $Opt;
         parent::reset($recipient, $rest);
@@ -38,6 +42,11 @@ class HotCRPMailer extends Mailer {
             $this->$k = @$rest[$k];
         if ($this->reviewNumber === null)
             $this->reviewNumber = "";
+        // Infer reviewer contac from rrow/comment_row
+        if (!@$this->contacts["reviewer"] && $this->rrow && @$this->rrow->reviewEmail)
+            $this->contacts["reviewer"] = self::make_reviewer_contact($this->rrow);
+        else if (!@$this->contacts["reviewer"] && $this->comment_row && @$this->comment_row->reviewEmail)
+            $this->contacts["reviewer"] = self::make_reviewer_contact($this->comment_row);
         // Do not put passwords in email that is cc'd elsewhere
         if ((!$Me || !$Me->privChair || @$Opt["chairHidePasswords"])
             && (@$rest["cc"] || @$rest["bcc"])
@@ -94,29 +103,21 @@ class HotCRPMailer extends Mailer {
 
     private function get_comments($tag) {
         global $Conf;
-        if ($this->hideReviews
-            || ($tag && $Conf->sversion < 68)
-            || ($this->comment_row && $tag
-                && stripos($this->comment_row->commentTags, " $tag ") === false))
+        if ($this->hideReviews)
+            return "";
+        $crows = $this->comment_row ? array($this->comment_row) : $this->row->all_comments();
+        if (!count($crows))
             return "";
 
         // save old au_seerev setting, and reset it so authors can see them.
         $old_au_seerev = $Conf->setting("au_seerev");
         $Conf->settings["au_seerev"] = AU_SEEREV_ALWAYS;
 
-        if ($this->comment_row)
-            $crows = array($this->comment_row);
-        else {
-            $where = "paperId=" . $this->row->paperId;
-            if ($tag)
-                $where .= " and commentTags like '% " . sqlq_for_like($tag) . " %'";
-            $crows = $Conf->comment_rows($Conf->comment_query($where), $this->permissionContact);
-        }
-
         $text = "";
         foreach ($crows as $crow)
-            if ($this->permissionContact->canViewComment($this->row, $crow, false))
-                $text .= CommentView::unparse_text($this->row, $crow, $this->permissionContact) . "\n";
+            if ((!$tag || ($crow->commentTags && stripos($crow->commentTags, " $tag ") !== false))
+                && $this->permissionContact->canViewComment($this->row, $crow, false))
+                $text .= $crow->unparse_text($this->permissionContact) . "\n";
 
         $Conf->settings["au_seerev"] = $old_au_seerev;
         return $text;
@@ -142,7 +143,7 @@ class HotCRPMailer extends Mailer {
 
     function infer_user_name($r, $contact) {
         // If user hasn't entered a name, try to infer it from author records
-        if ($this->row) {
+        if ($this->row && $this->row->paperId > 0) {
             $e1 = (string) @$contact->email;
             $e2 = (string) @$contact->preferredEmail;
             cleanAuthor($this->row);
@@ -160,9 +161,9 @@ class HotCRPMailer extends Mailer {
     function expandvar_generic($what, $isbool) {
         global $Conf, $Opt;
         if ($what == "%REVIEWDEADLINE%") {
-            if (@$this->row->reviewType > 0)
+            if ($this->row && @$this->row->reviewType > 0)
                 $rev = ($this->row->reviewType >= REVIEW_PC ? "pc" : "ext");
-            else if (isset($this->row->roles))
+            else if ($this->row && isset($this->row->roles))
                 $rev = ($this->row->roles & Contact::ROLE_PCLIKE ? "pc" : "ext");
             else if ($Conf->setting("pcrev_soft") != $Conf->setting("extrev_soft")) {
                 if ($isbool && ($Conf->setting("pcrev_soft") > 0) == ($Conf->setting("extrev_soft") > 0))

@@ -276,8 +276,10 @@ if (($getaction == "rev" || $getaction == "revz") && SearchActions::any()) {
 
     $crows = $Conf->comment_rows($Conf->paperQuery($Me, array("paperId" => SearchActions::selection(), "allComments" => 1, "reviewerName" => 1)), $Me);
     foreach ($crows as $row)
-        if ($Me->canViewComment($row, $row, null))
-            defappend($texts[$row->paperId], CommentView::unparse_text($row, $row, $Me) . "\n");
+        if ($Me->canViewComment($row, $row, null)) {
+            $crow = new CommentInfo($row, $row);
+            defappend($texts[$row->paperId], $crow->unparse_text($Me) . "\n");
+        }
 
     downloadReviews($texts, $errors);
 }
@@ -781,19 +783,17 @@ if ($getaction == "acmcms" && SearchActions::any() && $Me->privChair) {
     $xlsx->download_headers();
     $idq = "Paper.paperId" . SearchActions::sql_predicate();
 
-    // maybe analyze paper page counts
+    // analyze paper page counts
     $pagecount = array();
-    if ($Conf->sversion >= 55) {
-        $result = $Conf->qe("select Paper.paperId, ps.infoJson from Paper join PaperStorage ps on (ps.paperStorageId=Paper.finalPaperStorageId) where Paper.finalPaperStorageId>1 and $idq");
-        while (($row = edb_row($result)))
-            if ($row[1] && ($j = json_decode($row[1])) && isset($j->npages))
-                $pagecount[$row[0]] = $j->npages;
-            else {
-                $cf = new CheckFormat;
-                if ($cf->analyzePaper($row[0], true))
-                    $pagecount[$row[0]] = $cf->pages;
-            }
-    }
+    $result = $Conf->qe("select Paper.paperId, ps.infoJson from Paper join PaperStorage ps on (ps.paperStorageId=Paper.finalPaperStorageId) where Paper.finalPaperStorageId>1 and $idq");
+    while (($row = edb_row($result)))
+        if ($row[1] && ($j = json_decode($row[1])) && isset($j->npages))
+            $pagecount[$row[0]] = $j->npages;
+        else {
+            $cf = new CheckFormat;
+            if ($cf->analyzePaper($row[0], true))
+                $pagecount[$row[0]] = $cf->pages;
+        }
 
     // generate report
     $result = $Conf->qe("select Paper.paperId, title, authorInformation from Paper where $idq");
@@ -1004,25 +1004,28 @@ function saveformulas() {
         if ($name == $fdef->name && $expr == $fdef->expression)
             /* do nothing */;
         else if (!$Me->privChair && $fdef->createdBy < 0)
-            $ok = $Conf->errorMsg("You can't change formula &ldquo;" . htmlspecialchars($fdef->name) . "&rdquo; because it was created by an administrator.");
+            $ok = $Conf->errorMsg("You can’t change formula “" . htmlspecialchars($fdef->name) . "” because it was created by an administrator.");
         else if (($name == "" || $expr == "") && $fdef->formulaId != "n")
             $changes[] = "delete from Formula where formulaId=$fdef->formulaId";
         else if ($name == "")
             $ok = $Conf->errorMsg("Please enter a name for your new formula.");
         else if ($expr == "")
             $ok = $Conf->errorMsg("Please enter a definition for your new formula.");
-        else if (!($paperexpr = Formula::parse($expr)))
-            $ok = false;        /* errors already generated */
         else {
-            $exprViewScore = Formula::expression_view_score($paperexpr, $Me);
-            if ($exprViewScore <= $Me->viewReviewFieldsScore(null, true))
-                $ok = $Conf->errorMsg("The expression &ldquo;" . htmlspecialchars($expr) . "&rdquo; refers to paper properties that you aren't allowed to view.  Please define a different expression.");
-            else if ($fdef->formulaId == "n") {
-                $changes[] = "insert into Formula (name, heading, headingTitle, expression, authorView, createdBy, timeModified) values ('" . sqlq($name) . "', '', '', '" . sqlq($expr) . "', $exprViewScore, " . ($Me->privChair ? -$Me->contactId : $Me->contactId) . ", " . time() . ")";
-                if (!$Conf->setting("formulas"))
-                    $changes[] = "insert into Settings (name, value) values ('formulas', 1) on duplicate key update value=1";
-            } else
-                $changes[] = "update Formula set name='" . sqlq($name) . "', expression='" . sqlq($expr) . "', authorView=$exprViewScore, timeModified=" . time() . " where formulaId=$fdef->formulaId";
+            $formula = new Formula($expr);
+            if (!$formula->check())
+                $ok = $Conf->errorMsg($formula->error_html());
+            else {
+                $exprViewScore = $formula->view_score($Me);
+                if ($exprViewScore <= $Me->viewReviewFieldsScore(null, true))
+                    $ok = $Conf->errorMsg("The expression “" . htmlspecialchars($expr) . "” refers to paper properties that you aren’t allowed to view.  Please define a different expression.");
+                else if ($fdef->formulaId == "n") {
+                    $changes[] = "insert into Formula (name, heading, headingTitle, expression, authorView, createdBy, timeModified) values ('" . sqlq($name) . "', '', '', '" . sqlq($expr) . "', $exprViewScore, " . ($Me->privChair ? -$Me->contactId : $Me->contactId) . ", " . time() . ")";
+                    if (!$Conf->setting("formulas"))
+                        $changes[] = "insert into Settings (name, value) values ('formulas', 1) on duplicate key update value=1";
+                } else
+                    $changes[] = "update Formula set name='" . sqlq($name) . "', expression='" . sqlq($expr) . "', authorView=$exprViewScore, timeModified=" . time() . " where formulaId=$fdef->formulaId";
+            }
         }
     }
 
@@ -1573,9 +1576,9 @@ echo "</tr></table></td></tr>
 
 
 if ($pl) {
-    if (count($Search->warnings)) {
+    if (count($Search->warnings) || count($pl->error_html)) {
         echo "<div class='maintabsep'></div>\n";
-        $Conf->warnMsg(join("<br />\n", $Search->warnings));
+        $Conf->warnMsg(join("<br />\n", array_merge($Search->warnings, $pl->error_html)));
     }
 
     echo "<div class='maintabsep'></div>\n\n<div class='pltable_full_ctr'>";

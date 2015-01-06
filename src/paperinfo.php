@@ -19,7 +19,7 @@ class PaperContactInfo {
             $review_matcher = array("PaperReview.contactId=$cid");
             if ($rev_tokens && count($rev_tokens))
                 $review_matcher[] = "PaperReview.reviewToken in (" . join(",", $rev_tokens) . ")";
-            $result = Dbl::real_qe("select conflictType as conflict_type,
+            $result = Dbl::qe_raw("select conflictType as conflict_type,
                 reviewType as review_type,
                 reviewSubmitted as review_submitted,
                 reviewNeedsSubmit as review_needs_submit,
@@ -59,7 +59,9 @@ class PaperContactInfo {
 }
 
 class PaperInfo {
-    private $contact_info_ = array();
+    private $_contact_info = array();
+    private $_score_array = array();
+    private $_score_info = array();
 
     function __construct($p = null, $contact = null) {
         if ($p)
@@ -67,23 +69,30 @@ class PaperInfo {
                 $this->$k = $v;
         if ($contact && (property_exists($this, "conflictType")
                          || property_exists($this, "myReviewType"))) {
-            $cid = is_object($contact) ? $contact->contactId : $contact;
+            if ($contact === true)
+                $cid = property_exists($this, "contactId") ? $this->contactId : null;
+            else
+                $cid = is_object($contact) ? $contact->contactId : $contact;
             $this->assign_contact_info($this, $cid);
         }
     }
 
     static public function fetch($result, $contact) {
-        $pi = $result ? $result->fetch_object("PaperInfo") : null;
-        if ($pi && (property_exists($pi, "conflictType")
-                    || property_exists($pi, "myReviewType"))) {
-            if ($contact === true)
-                $cid = property_exists($pi, "contactId") ? $pi->contactId : null;
-            else
-                $cid = is_object($contact) ? $contact->contactId : $contact;
-            $pi->assign_contact_info($pi, $cid);
-        }
-        return $pi;
+        return $result ? $result->fetch_object("PaperInfo", array(null, $contact)) : null;
     }
+
+    static public function table_name() {
+        return "Paper";
+    }
+
+    static public function id_column() {
+        return "paperId";
+    }
+
+    static public function comment_table_name() {
+        return "PaperComment";
+    }
+
 
     public function contact_info($contact = null) {
         global $Me;
@@ -94,21 +103,34 @@ class PaperInfo {
             $rev_tokens = $contact->review_tokens();
             $contact = $contact->contactId;
         }
-        $ci = @$this->contact_info_[$contact];
+        $ci = @$this->_contact_info[$contact];
         if (!$ci)
-            $ci = $this->contact_info_[$contact] =
+            $ci = $this->_contact_info[$contact] =
                 PaperContactInfo::load($this->paperId, $contact, $rev_tokens);
         return $ci;
     }
 
     public function replace_contact_info_map($cimap) {
-        $old_cimap = $this->contact_info_;
-        $this->contact_info_ = $cimap;
+        $old_cimap = $this->_contact_info;
+        $this->_contact_info = $cimap;
         return $old_cimap;
     }
 
     public function assign_contact_info($row, $cid) {
-        $this->contact_info_[$cid] = PaperContactInfo::load_my($row, $cid);
+        $this->_contact_info[$cid] = PaperContactInfo::load_my($row, $cid);
+    }
+
+    public function pretty_text_title_indent($width = 75) {
+        $n = "Paper #{$this->paperId}: ";
+        $vistitle = UnicodeHelper::deaccent($this->title);
+        $l = (int) (($width + 0.5 - strlen($vistitle) - strlen($n)) / 2);
+        return max(14, $l + strlen($n));
+    }
+
+    public function pretty_text_title($width = 75) {
+        $l = $this->pretty_text_title_indent($width);
+        return prefix_word_wrap("Paper #{$this->paperId}: ",
+                                $this->title, $l) . "\n";
     }
 
     public function conflict_type($contact = null) {
@@ -146,7 +168,7 @@ class PaperInfo {
     }
 
     public function load_tags() {
-        $result = Dbl::real_qe("select group_concat(' ', tag, '#', tagIndex order by tag separator '') from PaperTag where paperId=$this->paperId group by paperId");
+        $result = Dbl::qe_raw("select group_concat(' ', tag, '#', tagIndex order by tag separator '') from PaperTag where paperId=$this->paperId group by paperId");
         $this->paperTags = "";
         if (($row = edb_row($result)) && $row[0] !== null)
             $this->paperTags = $row[0];
@@ -176,7 +198,7 @@ class PaperInfo {
     }
 
     private function load_topics() {
-        $result = Dbl::real_qe("select group_concat(topicId) from PaperTopic where paperId=$this->paperId");
+        $result = Dbl::qe_raw("select group_concat(topicId) from PaperTopic where paperId=$this->paperId");
         $row = edb_row($result);
         $this->topicIds = $row ? $row[0] : "";
     }
@@ -280,5 +302,76 @@ class PaperInfo {
         if (!property_exists($this, "option_array"))
             PaperOption::parse_paper_options($this);
         return @$this->option_array[$id];
+    }
+
+    static public function score_aggregate_field($fid) {
+        if ($fid === "contactId")
+            return "reviewContactIds";
+        else if ($fid === "reviewType")
+            return "reviewTypes";
+        else
+            return "{$fid}Scores";
+    }
+
+    public function load_scores($fids) {
+        $fids = mkarray($fids);
+        $req = array();
+        foreach ($fids as $fid)
+            $req[] = "group_concat($fid order by reviewId) " . self::score_aggregate_field($fid);
+        $result = Dbl::qe("select " . join(", ", $req) . " from PaperReview where paperId=$this->paperId and reviewSubmitted>0");
+        $row = null;
+        if ($result)
+            $row = $result->fetch_row();
+        $row = $row ? : array();
+        foreach ($fids as $i => $fid) {
+            $k = self::score_aggregate_field($fid);
+            $this->$k = @$row[$i];
+        }
+    }
+
+    public function submitted_reviewers() {
+        if (!property_exists($this, "reviewContactIds"))
+            $this->load_scores("contactId");
+        return $this->reviewContactIds ? explode(",", $this->reviewContactIds) : array();
+    }
+
+    public function submitted_review_types() {
+        if (!property_exists($this, "reviewTypes"))
+            $this->load_scores(array("reviewType", "contactId"));
+        return $this->reviewTypes ? array_combine(explode(",", $this->reviewContactIds),
+                                                  explode(",", $this->reviewTypes)) : array();
+    }
+
+    public function scores($fid) {
+        $fname = "{$fid}Scores";
+        if (!property_exists($this, $fname) || !property_exists($this, "reviewContactIds"))
+            $this->load_scores(array($fid, "contactId"));
+        return $this->$fname ? array_combine(explode(",", $this->reviewContactIds),
+                                             explode(",", $this->$fname)) : array();
+    }
+
+    public function score($fid, $cid) {
+        $s = $this->scores($fid);
+        return $s[$cid];
+    }
+
+    public function fetch_comments($where) {
+        $result = Dbl::qe("select PaperComment.*, firstName reviewFirstName, lastName reviewLastName, email reviewEmail
+            from PaperComment join ContactInfo on (ContactInfo.contactId=PaperComment.contactId)
+            where $where order by commentId");
+        $comments = array();
+        while (($c = CommentInfo::fetch($result, $this)))
+            $comments[$c->commentId] = $c;
+        return $comments;
+    }
+
+    public function load_comments() {
+        $this->comment_array = $this->fetch_comments("PaperComment.paperId=$this->paperId");
+    }
+
+    public function all_comments() {
+        if (!property_exists($this, "comment_array"))
+            $this->load_comments();
+        return $this->comment_array;
     }
 }

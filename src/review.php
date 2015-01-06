@@ -676,7 +676,7 @@ class ReviewForm {
             $reviewId = $rrow->reviewId;
             $contactId = $rrow->contactId;
         } else {
-            $result = Dbl::real_qe("insert into PaperReview set paperId=$prow->paperId, contactId=$contact->contactId, reviewType=" . REVIEW_PC . ", requestedBy=$contact->contactId, " . join(", ", $q));
+            $result = Dbl::qe_raw("insert into PaperReview set paperId=$prow->paperId, contactId=$contact->contactId, reviewType=" . REVIEW_PC . ", requestedBy=$contact->contactId, " . join(", ", $q));
             $reviewId = $result ? $result->insert_id : null;
             $contactId = $contact->contactId;
         }
@@ -900,12 +900,6 @@ $blind\n";
         return $x . "\n==+== Scratchpad (for unsaved private notes)\n\n==+== End Review\n";
     }
 
-    static function unparse_title_text($prow, &$l) {
-        $n = "Paper #" . $prow->paperId . ": ";
-        $l = max(14, (int) ((75.5 - strlen(UnicodeHelper::deaccent($prow->title)) - strlen($n)) / 2) + strlen($n));
-        return prefix_word_wrap($n, $prow->title, $l) . "\n";
-    }
-
     function prettyTextForm($prow, $rrow, $contact, $alwaysAuthorView = true) {
         global $Conf, $Opt;
 
@@ -929,7 +923,7 @@ $blind\n";
             $x .= str_pad($n, (int) (37.5 + strlen($n) / 2), " ", STR_PAD_LEFT) . "\n";
         }
         $x .= "---------------------------------------------------------------------------\n";
-        $x .= self::unparse_title_text($prow, $l);
+        $x .= $prow->pretty_text_title();
         if ($rrow && $contact->canViewReviewerIdentity($prow, $rrow, false)) {
             if (isset($rrow->reviewFirstName))
                 $n = Text::user_text($rrow->reviewFirstName, $rrow->reviewLastName, $rrow->reviewEmail);
@@ -937,7 +931,7 @@ $blind\n";
                 $n = Text::user_text($rrow);
             else
                 continue;
-            $x .= prefix_word_wrap("Reviewer: ", $n, $l) . "\n";
+            $x .= prefix_word_wrap("Reviewer: ", $n, $prow->pretty_text_title_indent()) . "\n";
         }
         $x .= "---------------------------------------------------------------------------\n\n";
 
@@ -1566,7 +1560,7 @@ $blind\n";
 
 
     function reviewFlowEntry($contact, $rrow, $trclass) {
-        // See also CommentView::commentFlowEntry
+        // See also CommentInfo::unparse_flow_entry
         global $Conf;
         $barsep = " &nbsp;<span class='barsep'>|</span>&nbsp; ";
         $a = "<a href='" . hoturl("paper", "p=$rrow->paperId#review" . unparseReviewOrdinal($rrow)) . "'";

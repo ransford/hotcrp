@@ -376,7 +376,7 @@ function doAssign() {
         $result = $Conf->qe("select paperId, count(reviewId) from PaperReview where reviewType=$reviewtype group by paperId");
         while (($row = edb_row($result)))
             if (isset($papers[$row[0]]))
-                $papers[$row[0]] -= $row[1];
+                $papers[$row[0]] = max($papers[$row[0]] - $row[1], 0);
     } else if ($atype == "lead" || $atype == "shepherd") {
         $papers = array();
         $xpapers = array_fill_keys($papersel, 1);
@@ -439,7 +439,7 @@ function doAssign() {
             if (!isset($papers[$pid]) || $prefs[$pc][$pid] < -1000000)
                 continue;
             // skip if already completely assigned
-            if ($papers[$pid] == 0
+            if ($papers[$pid] <= 0
                 || (isset($badpairs[$pc]) && !noBadPair($pc, $pid, $prefs))) {
                 ++$pref_nextdist[$pc];
                 continue;
@@ -628,7 +628,7 @@ echo "</div>\n";
 
 // action
 echo divClass("ass"), "<h3>Action</h3>", divClass("rev");
-doRadio("a", "rev", "Ensure each paper has <i>at least</i>");
+doRadio("a", "rev", "Ensure each selected paper has <i>at least</i>");
 echo "&nbsp; <input type='text' name='revct' value=\"", htmlspecialchars(defval($_REQUEST, "revct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; ";
 doSelect("revtype", array(REVIEW_PRIMARY => "primary", REVIEW_SECONDARY => "secondary", REVIEW_PC => "optional"));
 echo "&nbsp; review(s)</div>\n";
@@ -638,7 +638,7 @@ doRadio("a", "revadd", "Assign");
 echo "&nbsp; <input type='text' name='revaddct' value=\"", htmlspecialchars(defval($_REQUEST, "revaddct", 1)), "\" size='3' onfocus='autosub(\"assign\",this)' />&nbsp; ",
     "<i>additional</i>&nbsp; ";
 doSelect("revaddtype", array(REVIEW_PRIMARY => "primary", REVIEW_SECONDARY => "secondary", REVIEW_PC => "optional"));
-echo "&nbsp; review(s) per paper</div>\n";
+echo "&nbsp; review(s) per selected paper</div>\n";
 
 echo divClass("revpc");
 doRadio("a", "revpc", "Assign each PC member");

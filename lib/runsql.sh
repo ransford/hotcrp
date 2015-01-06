@@ -33,10 +33,10 @@ while [ $# -gt 0 ]; do
     case "$1" in
     --show-password=*)
         test -z "$mode" || usage
-	pwuser="`echo "+$1" | sed 's/^[^=]*=//'`"; mode=showpw;;
+        pwuser="`echo "+$1" | sed 's/^[^=]*=//'`"; mode=showpw;;
     --show-password)
-	test "$#" -gt 1 -a -z "$mode" || usage
-	pwuser="$2"; shift; mode=showpw;;
+        test "$#" -gt 1 -a -z "$mode" || usage
+        pwuser="$2"; shift; mode=showpw;;
     --set-password)
         test "$#" -gt 1 -a -z "$mode" || usage
         pwuser="$2"; pwvalue="$3"; shift; shift; mode=setpw;;
@@ -45,10 +45,10 @@ while [ $# -gt 0 ]; do
         makeuser="$2"; mode=makeuser; shift;;
     --show-opt=*|--show-option=*)
         test -z "$mode" || usage
-	optname="`echo "+$1" | sed 's/^[^=]*=//'`"; mode=showopt;;
+        optname="`echo "+$1" | sed 's/^[^=]*=//'`"; mode=showopt;;
     --show-opt|--show-option)
-	test "$#" -gt 1 -a -z "$mode" || usage
-	optname="$2"; shift; mode=showopt;;
+        test "$#" -gt 1 -a -z "$mode" || usage
+        optname="$2"; shift; mode=showopt;;
     -c|--co|--con|--conf|--confi|--config|-c*|--co=*|--con=*|--conf=*|--confi=*|--config=*)
         parse_common_argument "$@";;
     -n|--n|--na|--nam|--name|-n*|--n=*|--na=*|--nam=*|--name=*)
@@ -92,7 +92,7 @@ exitval=0
 if test -n "$pwuser"; then
     pwuser="`echo "+$pwuser" | sed -e 's,^.,,' | sql_quote`"
     if test "$mode" = showpw; then
-        echo "select concat(email, ',', if(substr(password,1,1)=' ','<HASH>',password)) from ContactInfo where email like '$pwuser' and disabled=0" | eval "$MYSQL $myargs -N $FLAGS $dbname"
+        echo "select concat(email, ',', if(substr(password,1,1)=' ','<HASH>',coalesce(password,'<NULL>'))) from ContactInfo where email like '$pwuser' and disabled=0" | eval "$MYSQL $myargs -N $FLAGS $dbname"
     else
         showpwvalue=n
         if [ -z "$pwvalue" ]; then
