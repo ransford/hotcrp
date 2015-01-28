@@ -1,6 +1,6 @@
 #! /bin/sh
 ## runsql.sh -- HotCRP database shell
-## HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+## HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 ## Distributed under an MIT-like license; see LICENSE
 
 export LC_ALL=C LC_CTYPE=C LC_COLLATE=C CONFNAME=
@@ -11,7 +11,7 @@ export PROG=$0
 
 usage () {
     if [ -z "$1" ]; then status=1; else status=$1; fi
-    echo "Usage: $PROG [-c CONFIGFILE] [MYSQL-OPTIONS]
+    echo "Usage: $PROG [-n CONFNAME | -c CONFIGFILE] [MYSQL-OPTIONS]
        $PROG --show-password EMAIL
        $PROG --set-password EMAIL [PASSWORD]
        $PROG --create-user EMAIL [COLUMN=VALUE...]" |
@@ -31,10 +31,10 @@ options_file=
 while [ $# -gt 0 ]; do
     shift=1
     case "$1" in
-    --show-password=*)
+    --show-password=*|--show-p=*|--show-pa=*|--show-pas=*|--show-pas=*|--show-pass=*|--show-passw=*|--show-passwo=*|--show-passwor=*)
         test -z "$mode" || usage
         pwuser="`echo "+$1" | sed 's/^[^=]*=//'`"; mode=showpw;;
-    --show-password)
+    --show-password|--show-p|--show-pa|--show-pas|--show-pass|--show-passw|--show-passwo|--show-passwor)
         test "$#" -gt 1 -a -z "$mode" || usage
         pwuser="$2"; shift; mode=showpw;;
     --set-password)
@@ -92,7 +92,7 @@ exitval=0
 if test -n "$pwuser"; then
     pwuser="`echo "+$pwuser" | sed -e 's,^.,,' | sql_quote`"
     if test "$mode" = showpw; then
-        echo "select concat(email, ',', if(substr(password,1,1)=' ','<HASH>',password)) from ContactInfo where email like '$pwuser' and disabled=0" | eval "$MYSQL $myargs -N $FLAGS $dbname"
+        echo "select concat(email, ',', if(substr(password,1,1)=' ','<HASH>',coalesce(password,'<NULL>'))) from ContactInfo where email like '$pwuser' and disabled=0" | eval "$MYSQL $myargs -N $FLAGS $dbname"
     else
         showpwvalue=n
         if [ -z "$pwvalue" ]; then

@@ -1,6 +1,6 @@
 <?php
 // init.php -- HotCRP initialization (test or site)
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 define("HOTCRP_VERSION", "2.93");
@@ -86,19 +86,17 @@ define("TAG_MAXLEN", 40);
 define("CAPTYPE_RESETPASSWORD", 1);
 define("CAPTYPE_CHANGEEMAIL", 2);
 
-global $CurrentList;
-$CurrentList = 0;
-
 global $reviewScoreNames;
 $reviewScoreNames = array("overAllMerit", "technicalMerit", "novelty",
                           "grammar", "reviewerQualification", "potential",
                           "fixability", "interestToCommunity", "longevity",
                           "likelyPresentation", "suitableForShort");
 
-global $OK;
+global $OK, $Now, $CurrentList, $CurrentProw;
 $OK = 1;
-global $Now;
 $Now = time();
+$CurrentList = 0;
+$CurrentProw = null;
 
 global $allowedSessionVars;
 $allowedSessionVars = array("foldpapera", "foldpaperp", "foldpaperb",
@@ -119,7 +117,7 @@ function set_path_variables() {
     require_once("$ConfSitePATH/lib/navigation.php");
     Navigation::analyze();
     if (@$ConfSiteBase === null)
-        $ConfSiteBase = Navigation::site_relative();
+        $ConfSiteBase = Navigation::siteurl();
     if (@$ConfSiteSuffix === null)
         $ConfSiteSuffix = Navigation::php_suffix();
 }

@@ -1,6 +1,6 @@
 <?php
 // mailclasses.php -- HotCRP mail tool
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class MailRecipients {
@@ -167,7 +167,7 @@ class MailRecipients {
             $needpaper = $needconflict = $needreview = false;
         } else if ($this->type == "pc" || substr($this->type, 0, 3) == "pc:") {
             $needpaper = $needconflict = $needreview = false;
-            $joins[] = "join PCMember using (contactId)";
+            $where[] = "(ContactInfo.roles&" . Contact::ROLE_PC . ")!=0";
             if ($this->type != "pc")
                 $where[] = "ContactInfo.contactTags like '% " . sqlq_for_like(substr($this->type, 3)) . " %'";
         } else if ($revmatch) {

@@ -1,6 +1,6 @@
 <?php
 // ht.php -- HotCRP HTML helper functions
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class Ht {
@@ -33,8 +33,10 @@ class Ht {
         return $x;
     }
 
-    static function script_file($src) {
-        return "<script src=\"" . htmlspecialchars($src) . "\"></script>";
+    static function script_file($src, $js = null) {
+        if ($js && @$js["crossorigin"] && !preg_match(',\A([a-z]+:)?//,', $src))
+            unset($js["crossorigin"]);
+        return '<script src="' . htmlspecialchars($src) . '"' . self::extra($js) . '></script>';
     }
 
     static function stylesheet_file($src) {
@@ -89,7 +91,7 @@ class Ht {
         $optgroup = "";
         foreach ($opt as $value => $info) {
             if (is_array($info) && $info[0] == "optgroup")
-                $info = (object) array("type" => "optgroup", "label" => $info[1]);
+                $info = (object) array("type" => "optgroup", "label" => @$info[1]);
             else if (is_string($info)) {
                 $info = (object) array("label" => $info);
                 if (is_array($disabled) && isset($disabled[$value]))
@@ -101,8 +103,12 @@ class Ht {
             if ($info === null)
                 $x .= '<option disabled="disabled"></option>';
             else if (isset($info->type) && $info->type == "optgroup") {
-                $x .= $optgroup . '<optgroup label="' . htmlspecialchars($info->label) . '">';
-                $optgroup = "</optgroup>";
+                $x .= $optgroup;
+                if ($info->label) {
+                    $x .= '<optgroup label="' . htmlspecialchars($info->label) . '">';
+                    $optgroup = "</optgroup>";
+                } else
+                    $optgroup = "";
             } else {
                 $x .= '<option value="' . $value . '"';
                 if (strcmp($value, $selected) == 0)

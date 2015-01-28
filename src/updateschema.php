@@ -1,6 +1,6 @@
 <?php
 // updateschema.php -- HotCRP function for updating old schemata
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 function update_schema_create_review_form($Conf) {
@@ -134,6 +134,25 @@ function update_schema_create_options($Conf) {
     }
 
     return $Conf->save_setting("options", 1, $opsj);
+}
+
+function update_schema_transfer_address($Conf) {
+    $result = $Conf->ql("select * from ContactAddress");
+    while (($row = edb_orow($result)))
+        if (($c = Contact::find_by_id($row->contactId))) {
+            $x = (object) array();
+            if ($row->addressLine1 || $row->addressLine2)
+                $x->address = array();
+            foreach (array("addressLine1", "addressLine2") as $k)
+                if ($row->$k)
+                    $x->address[] = $row->$k;
+            foreach (array("city" => "city", "state" => "state",
+                           "zipCode" => "zip", "country" => "country") as $k => $v)
+                if ($row->$k)
+                    $x->$v = $row->$k;
+            $c->merge_and_save_data($x);
+        }
+    return true;
 }
 
 function update_schema_version($Conf, $n) {
@@ -592,4 +611,24 @@ function updateSchema($Conf) {
         && $Conf->ql("alter table PaperStorage add `filterType` int(3) DEFAULT NULL")
         && $Conf->ql("alter table PaperStorage add `originalStorageId` int(11) DEFAULT NULL"))
         update_schema_version($Conf, 82);
+    if ($Conf->settings["allowPaperOption"] == 82
+        && $Conf->ql("update Settings set name='msg.resp_instrux' where name='msg.responseinstructions'"))
+        update_schema_version($Conf, 83);
+    if ($Conf->settings["allowPaperOption"] == 83
+        && $Conf->ql("alter table PaperComment add `commentRound` int(11) NOT NULL DEFAULT '0'"))
+        update_schema_version($Conf, 84);
+    if ($Conf->settings["allowPaperOption"] == 84
+        && $Conf->ql("insert ignore into Settings (name, value) select 'resp_active', value from Settings where name='resp_open'"))
+        update_schema_version($Conf, 85);
+    if ($Conf->settings["allowPaperOption"] == 85
+        && $Conf->ql("DROP TABLE IF EXISTS `PCMember`")
+        && $Conf->ql("DROP TABLE IF EXISTS `ChairAssistant`")
+        && $Conf->ql("DROP TABLE IF EXISTS `Chair`"))
+        update_schema_version($Conf, 86);
+    if ($Conf->settings["allowPaperOption"] == 86
+        && update_schema_transfer_address($Conf))
+        update_schema_version($Conf, 87);
+    if ($Conf->settings["allowPaperOption"] == 87
+        && $Conf->ql("DROP TABLE IF EXISTS `ContactAddress`"))
+        update_schema_version($Conf, 88);
 }

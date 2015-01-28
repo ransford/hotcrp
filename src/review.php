@@ -1,6 +1,6 @@
 <?php
 // review.php -- HotCRP helper class for producing review forms and tables
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 // JSON schema for settings["review_form"]:
@@ -575,7 +575,7 @@ class ReviewForm {
 
     function review_watch_callback($prow, $minic) {
         if ($prow->conflictType == 0
-            && $minic->canViewReview($prow, $this->mailer_info["rrow"], false))
+            && $minic->can_view_review($prow, $this->mailer_info["rrow"], false))
             HotCRPMailer::send_to($minic, $this->mailer_info["template"], $prow,
                                   $this->mailer_info);
     }
@@ -676,7 +676,7 @@ class ReviewForm {
             $reviewId = $rrow->reviewId;
             $contactId = $rrow->contactId;
         } else {
-            $result = Dbl::raw_qe("insert into PaperReview set paperId=$prow->paperId, contactId=$contact->contactId, reviewType=" . REVIEW_PC . ", requestedBy=$contact->contactId, " . join(", ", $q));
+            $result = Dbl::qe_raw("insert into PaperReview set paperId=$prow->paperId, contactId=$contact->contactId, reviewType=" . REVIEW_PC . ", requestedBy=$contact->contactId, " . join(", ", $q));
             $reviewId = $result ? $result->insert_id : null;
             $contactId = $contact->contactId;
         }
@@ -809,7 +809,7 @@ class ReviewForm {
             $x .= "==+== Version " . $rrow->reviewEditVersion . "\n";
         if (!$myReview && $prow)
             $x .= prefix_word_wrap("==-== Paper: ", $prow->title, "==-==        ") . "\n";
-        if ($contact->canViewReviewerIdentity($prow, $rrow, null)) {
+        if ($contact->can_view_review_identity($prow, $rrow, null)) {
             if ($rrow && isset($rrow->reviewFirstName))
                 $x .= "==+== Reviewer: " . Text::user_text($rrow->reviewFirstName, $rrow->reviewLastName, $rrow->reviewEmail) . "\n";
             else if ($rrow && isset($rrow->lastName))
@@ -924,7 +924,7 @@ $blind\n";
         }
         $x .= "---------------------------------------------------------------------------\n";
         $x .= $prow->pretty_text_title();
-        if ($rrow && $contact->canViewReviewerIdentity($prow, $rrow, false)) {
+        if ($rrow && $contact->can_view_review_identity($prow, $rrow, false)) {
             if (isset($rrow->reviewFirstName))
                 $n = Text::user_text($rrow->reviewFirstName, $rrow->reviewLastName, $rrow->reviewEmail);
             else if (isset($rrow->lastName))
@@ -1372,7 +1372,7 @@ $blind\n";
         }
 
         $submitted = $rrow && $rrow->reviewSubmitted;
-        if (!$Conf->time_review($rrow, $Me->actPC($prow, true), true)) {
+        if (!$Conf->time_review($rrow, $Me->act_pc($prow, true), true)) {
             $whyNot = array("deadline" => ($rrow && $rrow->reviewType < REVIEW_PC ? "extrev_hard" : "pcrev_hard"));
             $override_text = whyNotText($whyNot, "review");
             if (!$submitted) {
@@ -1428,8 +1428,8 @@ $blind\n";
 
         // Links
         if ($rrow) {
-            echo "<div class='floatright'>";
-            if (!$editmode && $Me->canReview($prow, $rrow))
+            echo '<div class="floatright">';
+            if (!$editmode && $Me->can_review($prow, $rrow))
                 echo "<a href='" . hoturl("review", "r=$reviewOrdinal") . "' class='xx'>",
                     Ht::img("edit.png", "[Edit]", "b"),
                     "&nbsp;<u>Edit</u></a><br />";
@@ -1453,7 +1453,7 @@ $blind\n";
         $open = $sep = " <span class='revinfo'>";
         $xsep = " <span class='barsep'>&nbsp;|&nbsp;</span> ";
         $showtoken = $rrow && $Me->review_token_cid($prow, $rrow);
-        if ($rrow && $Me->canViewReviewerIdentity($prow, $rrow, null)
+        if ($rrow && $Me->can_view_review_identity($prow, $rrow, null)
             && (!$showtoken || !Contact::is_anonymous_email($rrow->email))) {
             echo $sep, ($rrow->reviewBlind ? "[" : ""), "by ", Text::user_html($rrow), ($rrow->reviewBlind ? "]" : "");
             $sep = $xsep;
@@ -1500,7 +1500,7 @@ $blind\n";
         }
 
         // message?
-        if ($rrow && !$Me->ownReview($rrow) && $admin)
+        if ($rrow && !$Me->is_my_review($rrow) && $admin)
             echo "<div class='hint'>You didn’t write this review, but as an administrator you can still make changes.</div>\n";
 
         // download?
@@ -1572,7 +1572,7 @@ $blind\n";
         if (strlen($rrow->shortTitle) != strlen($rrow->title))
             $t .= "...";
         $t .= "</a>";
-        if ($contact->canViewReviewerIdentity($rrow, $rrow, false))
+        if ($contact->can_view_review_identity($rrow, $rrow, false))
             $t .= $barsep . "<span class='hint'>review by</span> " . Text::user_html($rrow->reviewFirstName, $rrow->reviewLastName, $rrow->reviewEmail);
         $t .= $barsep . "<span class='hint'>submitted</span> " . $Conf->parseableTime($rrow->reviewSubmitted, false);
         $t .= "</small><br /><a class='q'" . substr($a, 3) . ">";

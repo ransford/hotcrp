@@ -53,48 +53,6 @@ CREATE TABLE `CapabilityMap` (
 
 
 --
--- Table structure for table `Chair`
---
-
-DROP TABLE IF EXISTS `Chair`;
-CREATE TABLE `Chair` (
-  `contactId` int(11) NOT NULL,
-  UNIQUE KEY `contactId` (`contactId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-
-
---
--- Table structure for table `ChairAssistant`
---
-
-DROP TABLE IF EXISTS `ChairAssistant`;
-CREATE TABLE `ChairAssistant` (
-  `contactId` int(11) NOT NULL,
-  UNIQUE KEY `contactId` (`contactId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-
-
---
--- Table structure for table `ContactAddress`
---
-
-DROP TABLE IF EXISTS `ContactAddress`;
-CREATE TABLE `ContactAddress` (
-  `contactId` int(11) NOT NULL,
-  `addressLine1` varchar(2048) NOT NULL,
-  `addressLine2` varchar(2048) NOT NULL,
-  `city` varchar(2048) NOT NULL,
-  `state` varchar(2048) NOT NULL,
-  `zipCode` varchar(2048) NOT NULL,
-  `country` varchar(2048) NOT NULL,
-  UNIQUE KEY `contactId` (`contactId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-
-
---
 -- Table structure for table `ContactInfo`
 --
 
@@ -160,26 +118,14 @@ DROP TABLE IF EXISTS `MailLog`;
 CREATE TABLE `MailLog` (
   `mailId` int(11) NOT NULL AUTO_INCREMENT,
   `recipients` varchar(200) NOT NULL,
-  `q` varchar(4096),
-  `t` varchar(200),
+  `q` varchar(4096) DEFAULT NULL,
+  `t` varchar(200) DEFAULT NULL,
   `paperIds` text,
   `cc` text,
   `replyto` text,
   `subject` text,
   `emailBody` text,
   PRIMARY KEY (`mailId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
-
-
-
---
--- Table structure for table `PCMember`
---
-
-DROP TABLE IF EXISTS `PCMember`;
-CREATE TABLE `PCMember` (
-  `contactId` int(11) NOT NULL,
-  UNIQUE KEY `contactId` (`contactId`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 
@@ -242,6 +188,7 @@ CREATE TABLE `PaperComment` (
   `paperStorageId` int(11) NOT NULL DEFAULT '0',
   `ordinal` int(11) NOT NULL DEFAULT '0',
   `commentTags` varbinary(1024) DEFAULT NULL,
+  `commentRound` int(11) NOT NULL DEFAULT '0',
   PRIMARY KEY (`commentId`),
   UNIQUE KEY `commentId` (`commentId`),
   KEY `contactId` (`contactId`),
@@ -569,8 +516,10 @@ CREATE TABLE `TopicInterest` (
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 
+
+
+insert into Settings (name, value) values ('allowPaperOption', 88);
 insert into Settings (name, value) values ('setupPhase', 1);
-insert into Settings (name, value) values ('allowPaperOption', 82);
 -- collect PC conflicts from authors by default, but not collaborators
 insert into Settings (name, value) values ('sub_pcconf', 1);
 -- default chair-only tags

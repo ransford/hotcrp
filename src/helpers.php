@@ -1,6 +1,6 @@
 <?php
 // helpers.php -- HotCRP non-class helper functions
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 function defappend(&$var, $str) {
@@ -184,7 +184,7 @@ function hoturl_site_relative($page, $options = null) {
         && !preg_match($are . 'ls=/', $options))
         $options .= "&amp;ls=$CurrentList";
     // create slash-based URLs if appropriate
-    if ($options && !@$Opt["disableSlashURLs"]) {
+    if ($options && !@$Opt["disableSlashUrls"]) {
         if ($page == "review"
             && preg_match($are . 'r=(\d+[A-Z]+)' . $zre, $options, $m)) {
             $t .= "/" . $m[2];
@@ -194,7 +194,7 @@ function hoturl_site_relative($page, $options = null) {
         } else if (($is_paper_page
                     && preg_match($are . 'p=(\d+|%\w+%|new)' . $zre, $options, $m))
                    || ($page == "profile"
-                       && preg_match($are . 'u=([^&]+)' . $zre, $options, $m))
+                       && preg_match($are . 'u=([^&?]+)' . $zre, $options, $m))
                    || ($page == "help"
                        && preg_match($are . 't=(\w+)' . $zre, $options, $m))
                    || ($page == "settings"
@@ -559,7 +559,7 @@ function _tryNewList($opt, $listtype, $sort = null) {
         $searchtype = (defval($opt, "t") === "all" ? "all" : "pc");
         $q = "select email from ContactInfo";
         if ($searchtype == "pc")
-            $q .= " join PCMember using (contactId)";
+            $q .= " where (roles&" . Contact::ROLE_PC . ")!=0";
         $result = $Conf->ql("$q order by lastName, firstName, email");
         $a = array();
         while (($row = edb_row($result)))
@@ -1099,7 +1099,7 @@ function titleWords($title, $chars = 40) {
 
 function downloadCSV($info, $header, $filename, $options = array()) {
     global $Opt;
-    $iscsv = defval($options, "type", "csv") == "csv" && !isset($Opt["disableCSV"]);
+    $iscsv = defval($options, "type", "csv") == "csv" && !isset($Opt["disableCsv"]);
     $csvg = new CsvGenerator($iscsv ? CsvGenerator::TYPE_COMMA : CsvGenerator::TYPE_TAB);
     if ($header)
         $csvg->set_header($header, true);
@@ -1207,7 +1207,7 @@ function pcMembers() {
         || $PcMembersCache[0] < $Conf->setting("pc")
         || $PcMembersCache[1] != @$Opt["sortByLastName"]) {
         $pc = array();
-        $result = $Conf->q("select firstName, lastName, affiliation, email, ContactInfo.contactId contactId, roles, contactTags, disabled from ContactInfo join PCMember using (contactId)");
+        $result = $Conf->q("select firstName, lastName, affiliation, email, contactId, roles, contactTags, disabled from ContactInfo where (roles&" . Contact::ROLE_PC . ")!=0");
         $by_name_text = array();
         while (($row = edb_orow($result))) {
             $row = Contact::make($row);

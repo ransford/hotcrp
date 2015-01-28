@@ -1,6 +1,6 @@
 <?php
 // test01.php -- HotCRP tests
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 global $ConfSitePATH;
@@ -32,12 +32,12 @@ function check_paper1($paper1) {
     global $user_chair, $user_estrin, $user_kohler, $user_marina, $user_van, $user_nobody;
     assert_neqq($paper1, null);
 
-    assert($user_chair->canViewPaper($paper1));
-    assert($user_estrin->canViewPaper($paper1));
-    assert($user_marina->canViewPaper($paper1));
-    assert($user_van->canViewPaper($paper1));
-    assert(!$user_kohler->canViewPaper($paper1));
-    assert(!$user_nobody->canViewPaper($paper1));
+    assert($user_chair->can_view_paper($paper1));
+    assert($user_estrin->can_view_paper($paper1));
+    assert($user_marina->can_view_paper($paper1));
+    assert($user_van->can_view_paper($paper1));
+    assert(!$user_kohler->can_view_paper($paper1));
+    assert(!$user_nobody->can_view_paper($paper1));
 
     assert($user_chair->allow_administer($paper1));
     assert(!$user_estrin->allow_administer($paper1));
@@ -53,19 +53,19 @@ function check_paper1($paper1) {
     assert(!$user_kohler->can_administer($paper1));
     assert(!$user_nobody->can_administer($paper1));
 
-    assert($user_chair->canViewTags($paper1));
-    assert(!$user_estrin->canViewTags($paper1));
-    assert($user_marina->canViewTags($paper1));
-    assert(!$user_van->canViewTags($paper1));
-    assert(!$user_kohler->canViewTags($paper1));
-    assert(!$user_nobody->canViewTags($paper1));
+    assert($user_chair->can_view_tags($paper1));
+    assert(!$user_estrin->can_view_tags($paper1));
+    assert($user_marina->can_view_tags($paper1));
+    assert(!$user_van->can_view_tags($paper1));
+    assert(!$user_kohler->can_view_tags($paper1));
+    assert(!$user_nobody->can_view_tags($paper1));
 
-    assert($user_chair->canUpdatePaper($paper1));
-    assert($user_estrin->canUpdatePaper($paper1));
-    assert(!$user_marina->canUpdatePaper($paper1));
-    assert($user_van->canUpdatePaper($paper1));
-    assert(!$user_kohler->canUpdatePaper($paper1));
-    assert(!$user_nobody->canUpdatePaper($paper1));
+    assert($user_chair->can_update_paper($paper1));
+    assert($user_estrin->can_update_paper($paper1));
+    assert(!$user_marina->can_update_paper($paper1));
+    assert($user_van->can_update_paper($paper1));
+    assert(!$user_kohler->can_update_paper($paper1));
+    assert(!$user_nobody->can_update_paper($paper1));
 }
 
 $paper1 = $Conf->paperRow(1, $user_chair);
@@ -74,24 +74,24 @@ check_paper1($Conf->paperRow(1, $user_estrin));
 
 // grant user capability to read paper 1, check it doesn't allow PC view
 $user_capability = new Contact;
-assert(!$user_capability->canViewPaper($paper1));
+assert(!$user_capability->can_view_paper($paper1));
 $user_capability->apply_capability_text($Conf->capability_text($paper1, "a"));
 assert(!$user_capability->contactId);
-assert($user_capability->canViewPaper($paper1));
+assert($user_capability->can_view_paper($paper1));
 assert(!$user_capability->allow_administer($paper1));
 assert(!$user_capability->can_administer($paper1));
-assert(!$user_capability->canViewTags($paper1));
-assert(!$user_capability->canUpdatePaper($paper1));
+assert(!$user_capability->can_view_tags($paper1));
+assert(!$user_capability->can_update_paper($paper1));
 
 // change submission date
 $Conf->save_setting("sub_update", $Now - 5);
 $Conf->save_setting("sub_sub", $Now - 5);
-assert(!$user_chair->canUpdatePaper($paper1));
-assert(!$user_estrin->canUpdatePaper($paper1));
-assert(!$user_marina->canUpdatePaper($paper1));
-assert(!$user_van->canUpdatePaper($paper1));
-assert(!$user_kohler->canUpdatePaper($paper1));
-assert(!$user_nobody->canUpdatePaper($paper1));
+assert(!$user_chair->can_update_paper($paper1));
+assert(!$user_estrin->can_update_paper($paper1));
+assert(!$user_marina->can_update_paper($paper1));
+assert(!$user_van->can_update_paper($paper1));
+assert(!$user_kohler->can_update_paper($paper1));
+assert(!$user_nobody->can_update_paper($paper1));
 
 // role assignment works
 $paper18 = $Conf->paperRow(18, $user_mgbaker);
@@ -157,19 +157,19 @@ assert_eqq(join(";", array_keys($j)), "1");
 $comment1 = new CommentInfo(null, $paper1);
 $c1ok = $comment1->save(array("text" => "test", "visibility" => "a", "blind" => false), $user_mgbaker);
 assert($c1ok);
-assert(!$user_van->canViewComment($paper1, $comment1, false));
-assert(!$user_van->canViewCommentIdentity($paper1, $comment1, false));
+assert(!$user_van->can_view_comment($paper1, $comment1, false));
+assert(!$user_van->can_view_comment_identity($paper1, $comment1, false));
 $Conf->save_setting("au_seerev", AU_SEEREV_ALWAYS);
-assert($user_van->canViewComment($paper1, $comment1, false));
-assert(!$user_van->canViewCommentIdentity($paper1, $comment1, false));
+assert($user_van->can_view_comment($paper1, $comment1, false));
+assert(!$user_van->can_view_comment_identity($paper1, $comment1, false));
 $Conf->save_setting("rev_blind", Conference::BLIND_OPTIONAL);
-assert($user_van->canViewComment($paper1, $comment1, false));
-assert(!$user_van->canViewCommentIdentity($paper1, $comment1, false));
+assert($user_van->can_view_comment($paper1, $comment1, false));
+assert(!$user_van->can_view_comment_identity($paper1, $comment1, false));
 $c1ok = $comment1->save(array("text" => "test", "visibility" => "a", "blind" => false), $user_mgbaker);
 assert($c1ok);
-assert($user_van->canViewCommentIdentity($paper1, $comment1, false));
+assert($user_van->can_view_comment_identity($paper1, $comment1, false));
 $Conf->save_setting("rev_blind", null);
-assert(!$user_van->canViewCommentIdentity($paper1, $comment1, false));
+assert(!$user_van->can_view_comment_identity($paper1, $comment1, false));
 $Conf->save_setting("au_seerev", AU_SEEREV_NO);
 
 // set up some tags and tracks

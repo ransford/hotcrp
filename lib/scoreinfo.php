@@ -1,6 +1,6 @@
 <?php
 // scoreinfo.php -- HotCRP score analysis helper.
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class ScoreInfo {
@@ -8,6 +8,7 @@ class ScoreInfo {
     private $_keyed;
     private $_sum = 0;
     private $_sumsq = 0;
+    private $_n = 0;
 
     public function __construct($data) {
         if (($this->_keyed = is_array($data)))
@@ -19,24 +20,24 @@ class ScoreInfo {
                     if (($i = cvtint($i)) > 0)
                         $this->_scores[] = $i;
         }
-        foreach ($this->_scores as $i) {
-            $this->_sum += $i;
-            $this->_sumsq += $i * $i;
-        }
+        foreach ($this->_scores as $i)
+            if ($i) {
+                $this->_sum += $i;
+                $this->_sumsq += $i * $i;
+                ++$this->_n;
+            }
     }
 
     public function n() {
-        return count($this->_scores);
+        return $this->_n;
     }
 
     public function average() {
-        $n = count($this->_scores);
-        return $n > 0 ? $this->_sum / $n : 0;
+        return $this->_n > 0 ? $this->_sum / $this->_n : 0;
     }
 
     public function variance() {
-        $n = count($this->_scores);
-        return $n > 1 ? ($this->_sumsq - $this->_sum * $this->_sum / $n) / ($n - 1) : 0;
+        return $this->_n > 1 ? ($this->_sumsq - $this->_sum * $this->_sum / $this->_n) / ($this->_n - 1) : 0;
     }
 
     public function stddev() {

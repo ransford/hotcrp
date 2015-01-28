@@ -1,6 +1,6 @@
 <?php
 // comment.php -- HotCRP paper comment display/edit page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 $Error = $Warning = array();
@@ -30,22 +30,24 @@ function errorMsgExit($msg) {
 
 // collect paper ID
 function loadRows() {
-    global $Conf, $Me, $prow, $paperTable, $crow, $Error;
-    if (!($prow = PaperTable::paperRow($whyNot)))
+    global $Conf, $Me, $CurrentProw, $prow, $paperTable, $crow, $Error;
+    $CurrentProw = $prow = PaperTable::paperRow($whyNot);
+    if (!$prow)
         errorMsgExit(whyNotText($whyNot, "view"));
     $paperTable = new PaperTable($prow);
     $paperTable->resolveReview();
     $paperTable->resolveComments();
 
-    $crow = null;
     $cid = defval($_REQUEST, "commentId", "xxx");
+    $crow = null;
     foreach ($paperTable->crows as $row) {
         if ($row->commentId == $cid
             || ($cid == "response" && ($row->commentType & COMMENTTYPE_RESPONSE)))
             $crow = $row;
     }
-    if ($cid != "xxx" && !$crow && $cid != "response"
-        && $cid != "new" && $cid != "newresponse")
+    if (!$crow && $cid != "xxx" && $cid != "new"
+        /* following are obsolete */
+        && $cid != "response" && $cid != "newresponse")
         errorMsgExit("That comment does not exist.");
     if (isset($Error["paperId"]) && $Error["paperId"] != $prow->paperId)
         $Error = array();
@@ -60,8 +62,10 @@ if (isset($_REQUEST["post"]) && $_REQUEST["post"] && !count($_POST))
 
 
 // update comment action
-function saveComment($text, $is_response) {
+function save_comment($text, $is_response, $roundnum) {
     global $Me, $Conf, $prow, $crow;
+    if ($crow)
+        $roundnum = (int) $crow->commentRound;
 
     // If I have a review token for this paper, save under that anonymous user.
     $user = $Me;
@@ -76,7 +80,8 @@ function saveComment($text, $is_response) {
                  "tags" => @$_REQUEST["commenttags"],
                  "blind" => @$_REQUEST["blind"]);
     if ($is_response && !$crow)
-        $cinfo = new CommentInfo(COMMENTTYPE_RESPONSE, $prow);
+        $cinfo = new CommentInfo((object) array("commentType" => COMMENTTYPE_RESPONSE,
+                                                "commentRound" => $roundnum), $prow);
     else
         $cinfo = new CommentInfo($crow, $prow);
     $ok = $cinfo->save($req, $user);
@@ -84,11 +89,11 @@ function saveComment($text, $is_response) {
 
     $confirm = false;
     if (!$ok && $is_response) {
-        $crows = $Conf->comment_rows($Conf->comment_query("paperId=$prow->paperId and (commentType&" . COMMENTTYPE_RESPONSE . ")!=0"), $Me);
+        $crows = $Conf->comment_rows($Conf->comment_query("paperId=$prow->paperId and (commentType&" . COMMENTTYPE_RESPONSE . ")!=0 and commentRound=$roundnum"), $Me);
         reset($crows);
         $cur_response = @current($crows);
         if ($cur_response && $cur_response->comment == $text) {
-            $cinfo = $cur_response;
+            $cinfo = new CommentInfo($cur_response, $prow);
             $ok = true;
         } else
             $confirm = '<div class="xmerror">A response was entered concurrently by another user. Reload to see it.</div>';
@@ -101,12 +106,14 @@ function saveComment($text, $is_response) {
             $confirm .= 'Response saved. <strong>This draft response will not be shown to reviewers.</strong>';
         else
             $confirm .= 'Response deleted.';
-        if (($dl = $Conf->printableTimeSetting("resp_done")) != "N/A")
-            $confirm .= " You have until $deadline to submit the response.";
+        $isuf = $roundnum ? "_$roundnum" : "";
+        if (($dl = $Conf->printableTimeSetting("resp_done$isuf")) != "N/A")
+            $confirm .= " You have until $dl to submit the response.";
         $confirm .= '</div>';
-    } else if ($is_response)
-        $confirm = '<div class="xconfirm">Response submitted.</div>';
-    else if ($cinfo->commentId)
+    } else if ($is_response) {
+        $rname = $Conf->resp_round_text($roundnum);
+        $confirm = '<div class="xconfirm">' . ($rname ? "$rname response" : "Response") . ' submitted.</div>';
+    } else if ($cinfo->commentId)
         $confirm = '<div class="xconfirm">Comment saved.</div>';
     else
         $confirm = '<div class="xconfirm">Comment deleted.</div>';
@@ -119,34 +126,54 @@ function saveComment($text, $is_response) {
     $Conf->ajaxExit($j);
 }
 
+function handle_response() {
+    global $Conf, $Me, $prow, $crow;
+    $rname = @trim($_REQUEST["response"]);
+    $rnum = $Conf->resp_round_number($rname);
+    if ($rnum === false && $rname)
+        return $Conf->errorMsg("No such response round “" . htmlspecialchars($rname) . "”.");
+    $rnum = (int) $rnum;
+    if ($crow && @(int) $crow->commentRound !== $rnum) {
+        $Conf->warnMsg("Attempt to change response round ignored.");
+        $rnum = @+$crow->commentRound;
+    }
+
+    if (!($xcrow = $crow))
+        $xcrow = (object) array("commentType" => COMMENTTYPE_RESPONSE,
+                                "commentRound" => $rnum);
+    if (($whyNot = $Me->perm_respond($prow, $xcrow, true)))
+        return $Conf->errorMsg(whyNotText($whyNot, "respond to reviews for"));
+
+    $text = @rtrim($_REQUEST["comment"]);
+    if ($text === "" && !$crow)
+        return $Conf->errorMsg("Enter a response.");
+
+    save_comment($text, true, $rnum);
+}
+
+
 if (!check_post())
     /* do nothing */;
 else if ((@$_REQUEST["submitcomment"] || @$_REQUEST["submitresponse"] || @$_REQUEST["savedraftresponse"])
          && @$_REQUEST["response"]) {
-    $text = @rtrim($_REQUEST["comment"]);
-    if (!$Me->canRespond($prow, $crow, $whyNot, true))
-        $Conf->errorMsg(whyNotText($whyNot, "respond to reviews for"));
-    else if ($text === "" && !$crow)
-        $Conf->errorMsg("Enter a comment.");
-    else
-        saveComment($text, true);
+    handle_response();
     if (@$_REQUEST["ajax"])
         $Conf->ajaxExit(array("ok" => false));
 } else if (@$_REQUEST["submitcomment"]) {
     $text = @rtrim($_REQUEST["comment"]);
-    if (!$Me->canSubmitComment($prow, $crow, $whyNot))
+    if (($whyNot = $Me->perm_submit_comment($prow, $crow)))
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
     else if ($text === "" && !$crow)
         $Conf->errorMsg("Enter a comment.");
     else
-        saveComment($text, false);
+        save_comment($text, false, 0);
     if (@$_REQUEST["ajax"])
         $Conf->ajaxExit(array("ok" => false));
 } else if ((@$_REQUEST["deletecomment"] || @$_REQUEST["deleteresponse"]) && $crow) {
-    if (!$Me->canSubmitComment($prow, $crow, $whyNot))
+    if (($whyNot = $Me->perm_submit_comment($prow, $crow)))
         $Conf->errorMsg(whyNotText($whyNot, "comment on"));
     else
-        saveComment("", ($crow->commentType & COMMENTTYPE_RESPONSE) != 0);
+        save_comment("", ($crow->commentType & COMMENTTYPE_RESPONSE) != 0, $crow->commentRound);
     if (@$_REQUEST["ajax"])
         $Conf->ajaxExit(array("ok" => false));
 } else if (@$_REQUEST["cancel"] && $crow)

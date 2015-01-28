@@ -1,6 +1,6 @@
 <?php
 // paperinfo.php -- HotCRP paper objects
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class PaperContactInfo {
@@ -19,7 +19,7 @@ class PaperContactInfo {
             $review_matcher = array("PaperReview.contactId=$cid");
             if ($rev_tokens && count($rev_tokens))
                 $review_matcher[] = "PaperReview.reviewToken in (" . join(",", $rev_tokens) . ")";
-            $result = Dbl::raw_qe("select conflictType as conflict_type,
+            $result = Dbl::qe_raw("select conflictType as conflict_type,
                 reviewType as review_type,
                 reviewSubmitted as review_submitted,
                 reviewNeedsSubmit as review_needs_submit,
@@ -168,7 +168,7 @@ class PaperInfo {
     }
 
     public function load_tags() {
-        $result = Dbl::raw_qe("select group_concat(' ', tag, '#', tagIndex order by tag separator '') from PaperTag where paperId=$this->paperId group by paperId");
+        $result = Dbl::qe_raw("select group_concat(' ', tag, '#', tagIndex order by tag separator '') from PaperTag where paperId=$this->paperId group by paperId");
         $this->paperTags = "";
         if (($row = edb_row($result)) && $row[0] !== null)
             $this->paperTags = $row[0];
@@ -198,7 +198,7 @@ class PaperInfo {
     }
 
     private function load_topics() {
-        $result = Dbl::raw_qe("select group_concat(topicId) from PaperTopic where paperId=$this->paperId");
+        $result = Dbl::qe_raw("select group_concat(topicId) from PaperTopic where paperId=$this->paperId");
         $row = edb_row($result);
         $this->topicIds = $row ? $row[0] : "";
     }

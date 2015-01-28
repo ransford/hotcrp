@@ -1,6 +1,6 @@
 <?php
 // mail.php -- HotCRP mail tool
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 require_once("src/initweb.php");
@@ -227,7 +227,9 @@ class MailSender {
                     echo "<td class='mhx'></td>";
                 else {
                     ++$this->cbcount;
-                    echo "<td class='mhcb'><input type='checkbox' class='cb' name='$cbkey' value='1' checked='checked' id='psel", $this->cbcount, "' onclick='pselClick(event,this)' /></td>";
+                    echo '<td class="mhcb"><input type="checkbox" class="cb" name="', $cbkey,
+                        '" value="1" checked="checked" rangetype="mhcb" id="psel', $this->cbcount,
+                        '" onclick="rangeclick(event,this)" /></td>';
                 }
                 $v = substr($line, strlen($k) + 2);
                 echo '<td class="mhnp">', substr($line, 0, strlen($k)), ":</td>",
@@ -298,16 +300,17 @@ class MailSender {
         $result = $Conf->qe($q);
         if (!$result)
             return;
+        $recipients = defval($_REQUEST, "recipients", "");
 
         if ($this->sending) {
-            $q = "recipients='" . sqlq($_REQUEST["recipients"])
+            $q = "recipients='" . sqlq($recipients)
                 . "', cc='" . sqlq($_REQUEST["cc"])
                 . "', replyto='" . sqlq($_REQUEST["replyto"])
                 . "', subject='" . sqlq($_REQUEST["subject"])
                 . "', emailBody='" . sqlq($_REQUEST["emailBody"]) . "'";
             if ($Conf->sversion >= 79)
                 $q .= ", q='" . sqlq($_REQUEST["q"]) . "', t='" . sqlq($_REQUEST["t"]) . "'";
-            if (($log_result = Dbl::raw_query("insert into MailLog set $q")))
+            if (($log_result = Dbl::query_raw("insert into MailLog set $q")))
                 $this->mailid_text = " #" . $log_result->insert_id;
             $Me->log_activity("Sending mail$this->mailid_text \"$subject\"");
         }
@@ -320,7 +323,7 @@ class MailSender {
         $nrows_left = edb_nrows($result);
         $nwarnings = 0;
         $preperrors = array();
-        $revinform = ($_REQUEST["recipients"] == "newpcrev" ? array() : null);
+        $revinform = ($recipients == "newpcrev" ? array() : null);
         while (($row = PaperInfo::fetch($result, $Me))) {
             ++$nrows_done;
 

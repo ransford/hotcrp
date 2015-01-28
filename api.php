@@ -1,6 +1,6 @@
 <?php
 // api.php -- HotCRP JSON API access page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 require_once("src/initweb.php");
@@ -24,23 +24,30 @@ if (@$_REQUEST["track"] && $Me->privChair && check_post()) {
     }
 }
 
-$j = $Me->my_deadlines();
+if (@$_GET["p"] && ctype_digit($_GET["p"])) {
+    $CurrentProw = $Conf->paperRow(array("paperId" => intval($_GET["p"])), $Me);
+    if ($CurrentProw && !$Me->can_view_paper($CurrentProw))
+        $CurrentProw = null;
+}
 
-if (@$j["tracker"] && $Me->privChair && @$_REQUEST["pc_conflicts"])
-    MeetingTracker::status_add_pc_conflicts($j["tracker"]);
+
+$j = $Me->my_deadlines($CurrentProw);
+
+if (@$j->tracker && $Me->privChair && @$_REQUEST["pc_conflicts"])
+    MeetingTracker::status_add_pc_conflicts($j->tracker);
 if (@$_REQUEST["checktracker"]) {
-    $tracker = @$j["tracker"] ? $j["tracker"] : $Conf->setting_json("tracker");
-    $j["tracker_status"] = MeetingTracker::tracker_status($tracker);
+    $tracker = @$j->tracker ? : $Conf->setting_json("tracker");
+    $j->tracker_status = MeetingTracker::tracker_status($tracker);
 }
 if (@$_REQUEST["conflist"] && $Me->has_email() && ($cdb = Contact::contactdb())) {
-    $j["conflist"] = array();
+    $j->conflist = array();
     $result = Dbl::ql($cdb, "select c.confid, siteclass, shortName, url
         from Roles r join Conferences c on (c.confid=r.confid)
         join ContactInfo u on (u.contactDbId=r.contactDbId)
         where u.email=? order by r.updated_at desc", $Me->email);
     while (($row = edb_orow($result))) {
         $row->confid = (int) $row->confid;
-        $j["conflist"][] = $row;
+        $j->conflist[] = $row;
     }
 }
 if (@$_REQUEST["jserror"] && @$_REQUEST["error"]) {
@@ -56,7 +63,7 @@ if (@$_REQUEST["jserror"] && @$_REQUEST["error"]) {
     error_log("JS error: $url" . $_REQUEST["error"]);
 }
 
-$j["ok"] = true;
-if (@$j["tracker"]) /* microsecond time precision is called for! */
-    $j["now"] = microtime(true);
+$j->ok = true;
+if (@$j->tracker) /* microsecond time precision is called for! */
+    $j->now = microtime(true);
 $Conf->ajaxExit($j);

@@ -1,6 +1,6 @@
 <?php
 // homepage.php -- HotCRP home page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 require_once("papersearch.php");
@@ -147,13 +147,12 @@ echo "<div class='homeinside'><div id='homeinfo'>
 // Any deadlines set?
 $sep = "";
 if ($Me->has_reportable_deadline())
-    echo "    <li><a href='", hoturl("deadlines"), "'>Deadlines</a></li>\n";
+    echo '    <li><a href="', hoturl("deadlines"), '">Deadlines</a></li>', "\n";
 echo "    <li><a href='", hoturl("users", "t=pc"), "'>Program committee</a></li>\n";
 if (isset($Opt['conferenceSite']) && $Opt['conferenceSite'] != $Opt['paperSite'])
     echo "    <li><a href='", $Opt['conferenceSite'], "'>Conference site</a></li>\n";
 if ($Conf->timeAuthorViewDecision()) {
-    $dl = $Conf->deadlines();
-    $dlt = max($dl["sub_sub"], $dl["sub_close"]);
+    $dlt = max(@$Conf->setting("sub_sub"), @$Conf->setting("sub_close"));
     $result = $Conf->qe("select outcome, count(paperId) from Paper where timeSubmitted>0 " . ($dlt ? "or (timeSubmitted=-100 and timeWithdrawn>=$dlt) " : "") . "group by outcome");
     $n = $nyes = 0;
     while (($row = edb_row($result))) {
@@ -331,9 +330,10 @@ if ($Me->is_reviewer() && ($Me->privChair || $papersub)) {
     if ($Me->isPC || $Me->privChair) {
         $result = $Conf->qe("select count(reviewId) num_submitted,
 	group_concat(overAllMerit) scores
-	from PCMember
-	left join PaperReview on (PaperReview.contactId=PCMember.contactId and PaperReview.reviewSubmitted is not null)
-	group by PCMember.contactId");
+	from ContactInfo
+	left join PaperReview on (PaperReview.contactId=ContactInfo.contactId and PaperReview.reviewSubmitted is not null)
+        where (roles&" . Contact::ROLE_PC . ")!=0
+	group by ContactInfo.contactId");
         while (($row = edb_row($result))) {
             ++$npc;
             if ($row[0]) {

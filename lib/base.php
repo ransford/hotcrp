@@ -1,6 +1,6 @@
 <?php
 // base.php -- HotCRP base helper functions
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 // string helpers
@@ -13,6 +13,11 @@ function str_starts_with($haystack, $needle) {
 function str_ends_with($haystack, $needle) {
     $p = strlen($haystack) - strlen($needle);
     return $p >= 0 && substr($haystack, $p) === $needle;
+}
+
+function stri_ends_with($haystack, $needle) {
+    $p = strlen($haystack) - strlen($needle);
+    return $p >= 0 && strcasecmp(substr($haystack, $p), $needle) == 0;
 }
 
 function cleannl($text) {
@@ -93,6 +98,14 @@ function html_id_decode($text) {
     return join("", $x);
 }
 
+function base64url_encode($text) {
+    return rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
+}
+
+function base64url_decode($data) {
+    return base64_decode(strtr($text, '-_', '+/'));
+}
+
 
 // JSON encoding helpers
 
@@ -124,15 +137,26 @@ function is_associative_array($a) {
 }
 
 function array_to_object_recursive($a) {
-    $o = (object) array();
-    foreach ($a as $k => $v)
-        if ($k === "")
-            /* skip */;
-        else if (is_associative_array($v))
-            $o->$k = array_to_object_recursive($v);
+    if (is_associative_array($a)) {
+        $o = (object) array();
+        foreach ($a as $k => $v)
+            if ($k !== "")
+                $o->$k = array_to_object_recursive($v);
+        return $o;
+    } else
+        return $a;
+}
+
+function object_replace_recursive($a, $b) {
+    foreach (get_object_vars($b) as $k => $v)
+        if ($v === null)
+            unset($a->$k);
+        else if (!property_exists($a, $k)
+                 || !is_object($a->$k)
+                 || !is_object($v))
+            $a->$k = $v;
         else
-            $o->$k = $v;
-    return $o;
+            object_replace_recursive($a->$k, $v);
 }
 
 
@@ -142,20 +166,30 @@ function caller_landmark($position = 1, $skipfunction_re = null) {
     if (is_string($position))
         list($position, $skipfunction_re) = array(1, $position);
     $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-    while ($skipfunction_re && isset($trace[$position + 1])) {
+    $fname = null;
+    for (++$position; isset($trace[$position]); ++$position) {
         $fname = (string) @$trace[$position]["class"];
         $fname .= ($fname ? "::" : "") . $trace[$position]["function"];
-        if (!preg_match($skipfunction_re, $fname))
+        if ((!$skipfunction_re || !preg_match($skipfunction_re, $fname))
+            && ($fname !== "call_user_func" || @$trace[$position - 1]["file"]))
             break;
-        ++$position;
     }
-    $pi = @$trace[$position];
-    if ($pi && @$pi["class"])
-        $pi["function"] = $pi["class"] . "::" . $pi["function"];
-    if ($pi && @$pi["file"])
-        return $pi["file"] . ":" . $pi["line"] . ":" . $pi["function"];
-    else if ($pi)
-        return $pi["function"];
-    else
-        return "<unknown>";
+    $t = "";
+    if ($position > 0 && ($pi = @$trace[$position - 1]) && @$pi["file"])
+        $t = $pi["file"] . ":" . $pi["line"];
+    if ($fname)
+        $t .= ($t ? ":" : "") . $fname;
+    return $t ? : "<unknown>";
+}
+
+
+// pcntl helpers
+
+if (!function_exists("pcntl_wifexited")) {
+    function pcntl_wifexited($status) {
+        return ($status & 0x7f) == 0;
+    }
+    function pcntl_wexitstatus($status) {
+        return ($status & 0xff00) >> 8;
+    }
 }

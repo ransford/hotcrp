@@ -1,6 +1,6 @@
 <?php
 // paper.php -- HotCRP paper view and edit page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 $Error = $Warning = array();
@@ -9,7 +9,7 @@ require_once("src/papertable.php");
 if ($Me->is_empty())
     $Me->escape();
 if (@$_REQUEST["update"] && check_post() && !$Me->has_database_account()
-    && $Me->canStartPaper())
+    && $Me->can_start_paper())
     $Me = $Me->activate_database_account();
 $useRequest = isset($_REQUEST["after_login"]);
 foreach (array("emailNote", "reason") as $x)
@@ -23,7 +23,7 @@ if (!isset($_REQUEST["p"]) && !isset($_REQUEST["paperId"])
     && preg_match(',\A/(?:new|\d+)\z,i', Navigation::path()))
     $_REQUEST["p"] = substr(Navigation::path(), 1);
 else if (!Navigation::path() && @$_REQUEST["p"] && ctype_digit($_REQUEST["p"])
-         && !@$Opt["disableSlashURLs"] && !check_post())
+         && !@$Opt["disableSlashUrls"] && !check_post())
     go(selfHref());
 
 
@@ -63,8 +63,9 @@ if (isset($_REQUEST["post"]) && $_REQUEST["post"] && !count($_POST))
 
 // grab paper row
 function loadRows() {
-    global $prow, $Error;
-    if (!($prow = PaperTable::paperRow($whyNot)))
+    global $prow, $CurrentProw, $Error;
+    $CurrentProw = $prow = PaperTable::paperRow($whyNot);
+    if (!$prow)
         errorMsgExit(whyNotText($whyNot, "view"));
     if (isset($Error["paperId"]) && $Error["paperId"] != $prow->paperId)
         $Error = array();
@@ -124,7 +125,7 @@ if (isset($_REQUEST["checkformat"]) && $prow && $Conf->setting("sub_banal")) {
 
 // withdraw and revive actions
 if (isset($_REQUEST["withdraw"]) && !$newPaper && check_post()) {
-    if ($Me->canWithdrawPaper($prow, $whyNot)) {
+    if (!($whyNot = $Me->perm_withdraw_paper($prow))) {
         $reason = defval($_REQUEST, "reason", "");
         if ($reason == "" && $Me->privChair && defval($_REQUEST, "doemail") > 0)
             $reason = defval($_REQUEST, "emailNote", "");
@@ -158,7 +159,7 @@ if (isset($_REQUEST["withdraw"]) && !$newPaper && check_post()) {
         $Conf->errorMsg(whyNotText($whyNot, "withdraw"));
 }
 if (isset($_REQUEST["revive"]) && !$newPaper && check_post()) {
-    if ($Me->canRevivePaper($prow, $whyNot)) {
+    if (!($whyNot = $Me->perm_revive_paper($prow))) {
         Dbl::qe("update Paper set timeWithdrawn=0, timeSubmitted=if(timeSubmitted=-100,$Now,0), withdrawReason=null where paperId=$paperId");
         $Conf->qe("update PaperReview set reviewNeedsSubmit=1 where paperId=$paperId and reviewSubmitted is null");
         $Conf->qe("update PaperReview join PaperReview as Req on (Req.paperId=$paperId and Req.requestedBy=PaperReview.contactId and Req.reviewType=" . REVIEW_EXTERNAL . ") set PaperReview.reviewNeedsSubmit=-1 where PaperReview.paperId=$paperId and PaperReview.reviewSubmitted is null and PaperReview.reviewType=" . REVIEW_SECONDARY);
@@ -469,7 +470,7 @@ function report_update_paper_errors() {
 
 // send watch messages
 function final_submit_watch_callback($prow, $minic) {
-    if ($minic->canViewPaper($prow))
+    if ($minic->can_view_paper($prow))
         HotCRPMailer::send_to($minic, "@finalsubmitnotify", $prow);
 }
 
@@ -598,7 +599,7 @@ function update_paper($Me, $isSubmit, $isSubmitFinal, $diffs) {
     if (!$newPaper)
         $Conf->qe("update Paper set " . join(", ", $q) . " where paperId=$paperId and timeWithdrawn<=0");
     else {
-        if (!($result = Dbl::raw_qe("insert into Paper set " . join(", ", $q)))) {
+        if (!($result = Dbl::qe_raw("insert into Paper set " . join(", ", $q)))) {
             $Conf->errorMsg("Could not create paper.");
             return false;
         }
@@ -770,18 +771,18 @@ if ((@$_REQUEST["update"] || @$_REQUEST["submitfinal"])
 
     // check deadlines
     if ($newPaper)
-        // we know that canStartPaper implies canFinalizePaper
-        $ok = $Me->canStartPaper($whyNot);
+        // we know that can_start_paper implies can_finalize_paper
+        $whyNot = $Me->perm_start_paper();
     else if (@$_REQUEST["submitfinal"])
-        $ok = $Me->canSubmitFinalPaper($prow, $whyNot);
+        $whyNot = $Me->perm_submit_final_paper($prow);
     else {
-        $ok = $Me->canUpdatePaper($prow, $whyNot);
-        if (!$ok && @$_REQUEST["submitpaper"] && !count($diffs))
-            $ok = $Me->canFinalizePaper($prow, $whyNot);
+        $whyNot = $Me->perm_update_paper($prow);
+        if ($whyNot && @$_REQUEST["submitpaper"] && !count($diffs))
+            $whyNot = $Me->perm_finalize_paper($prow);
     }
 
     // actually update
-    if ($ok) {
+    if (!$whyNot) {
         if (update_paper($Me, !!@$_REQUEST["submitpaper"],
                          !!@$_REQUEST["submitfinal"], $diffs))
             redirectSelf(array("p" => $paperId, "m" => "pe"));
@@ -796,7 +797,7 @@ if ((@$_REQUEST["update"] || @$_REQUEST["submitfinal"])
     }
 
     // use request?
-    $useRequest = ($ok || $Me->privChair);
+    $useRequest = (!$whyNot || $Me->privChair);
 }
 
 if (isset($_REQUEST["updatecontacts"]) && check_post() && !$newPaper) {
@@ -869,7 +870,7 @@ confHeader();
 
 // prepare paper table
 if ($paperTable->mode == "pe") {
-    $editable = $newPaper || $Me->canUpdatePaper($prow, $whyNot, true);
+    $editable = $newPaper || $Me->can_update_paper($prow, true);
     if ($prow && $prow->outcome > 0 && $Conf->collectFinalPapers()
         && (($Conf->timeAuthorViewDecision() && $Conf->timeSubmitFinalPaper())
             || $Me->allow_administer($prow)))

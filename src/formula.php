@@ -1,6 +1,6 @@
 <?php
 // formula.php -- HotCRP helper class for paper expressions
-// HotCRP is Copyright (c) 2009-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2009-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class FormulaCompileState {
@@ -50,14 +50,14 @@ class FormulaCompileState {
     function _add_submitted_reviewers() {
         if (!isset($this->gtmp["submitted_reviewers"])) {
             $this->gtmp["submitted_reviewers"] = "\$submitted_reviewers";
-            $this->gstmt[] = "\$submitted_reviewers = (\$forceShow || \$contact->canViewReview(\$prow, null, false) ? \$prow->submitted_reviewers() : array());";
+            $this->gstmt[] = "\$submitted_reviewers = (\$forceShow || \$contact->can_view_review(\$prow, null, false) ? \$prow->submitted_reviewers() : array());";
         }
         return "\$submitted_reviewers";
     }
     function _add_review_prefs() {
         if (!isset($this->gtmp["allrevprefs"])) {
             $this->gtmp["allrevprefs"] = "\$allrevprefs";
-            $this->gstmt[] = "\$allrevprefs = (\$forceShow || \$contact->canViewReview(\$prow, null, false) ? \$prow->reviewer_preferences() : array());";
+            $this->gstmt[] = "\$allrevprefs = (\$forceShow || \$contact->can_view_review(\$prow, null, false) ? \$prow->reviewer_preferences() : array());";
         }
         return "\$allrevprefs";
     }
@@ -176,7 +176,7 @@ class Formula {
     private $_parse = null;
     private $_error_html = null;
 
-    const BINARY_OPERATOR_REGEX = '/\A(?:[-\+\/%^]|\*\*?|\&\&?|\|\|?|=|[=!]=|<[<=]?|>[>=]?|≤|≥|≠)/';
+    const BINARY_OPERATOR_REGEX = '/\A(?:[-\+\/%^]|\*\*?|\&\&?|\|\|?|==?|!=|<[<=]?|>[>=]?|≤|≥|≠)/';
 
     private static $_opprec = array(
         "**" => 13,
@@ -394,7 +394,7 @@ class Formula {
 
             $t = $tn;
             $op = @self::$_oprewrite[$op] ? : $op;
-            if (!($e2 = $this->_parse_expr($t, self::$_oprassoc[$op] ? $opprec : $opprec + 1, $in_qc)))
+            if (!($e2 = $this->_parse_expr($t, @self::$_oprassoc[$op] ? $opprec : $opprec + 1, $in_qc)))
                 return null;
             $e = FormulaExpr::make($op, $e, $e2);
         }
@@ -447,7 +447,7 @@ class Formula {
             $state->queryOptions["tags"] = true;
             $tagger = new Tagger($state->contact);
             $e_tag = $tagger->check($e->args[0]);
-            $t_tags = $state->_addgtemp("tags", "(\$forceShow || \$contact->canViewTags(\$prow, true) ? \$prow->paperTags : '')");
+            $t_tags = $state->_addgtemp("tags", "(\$forceShow || \$contact->can_view_tags(\$prow, true) ? \$prow->paperTags : '')");
             $t_tagpos = $state->_addgtemp("tagpos {$e->args[0]}", "stripos($t_tags, \" $e_tag#\")");
             $t_tagval = $state->_addgtemp("tagval {$e->args[0]}", "($t_tagpos !== false ? (int) substr($t_tags, $t_tagpos + " . (strlen($e_tag) + 2) . ") : null)");
             if ($op == "tag")
@@ -578,13 +578,13 @@ class Formula {
     else';
 
         // HTML format for output depends on type of output
-        if ($e->format === "revprefexp")
+        if ($this->_parse->format === "revprefexp")
             $t .= "\n      "
                 . 'return ReviewField::unparse_letter(91, $x + 2);';
-        else if ($e->format instanceof ReviewField
-                 && $e->format->option_letter)
+        else if ($this->_parse->format instanceof ReviewField
+                 && $this->_parse->format->option_letter)
             $t .= "\n      "
-                . 'return ReviewField::unparse_letter(' . $e->format->option_letter . ', $x);';
+                . 'return ReviewField::unparse_letter(' . $this->_parse->format->option_letter . ', $x);';
         else
             $t .= "\n      "
                 . 'return round($x * 100) / 100;';

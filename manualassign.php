@@ -1,6 +1,6 @@
 <?php
 // manualassign.php -- HotCRP chair's paper assignment page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 require_once("src/initweb.php");
@@ -153,10 +153,11 @@ else
 echo "<table><tr><td><div class='aahc assignpc_pcsel'>",
     Ht::form_div(hoturl("manualassign"), array("method" => "get", "id" => "selectreviewerform"));
 
-$result = $Conf->qe("select PCMember.contactId, count(reviewId) as reviewCount
-                from PCMember
-                left join PaperReview on (PCMember.contactId=PaperReview.contactId and PaperReview.reviewType>=" . REVIEW_SECONDARY . ")
-                group by contactId");
+$result = $Conf->qe("select ContactInfo.contactId, count(reviewId) as reviewCount
+                from ContactInfo
+                left join PaperReview on (PaperReview.contactId=ContactInfo.contactId and PaperReview.reviewType>=" . REVIEW_SECONDARY . ")
+                where (roles&" . Contact::ROLE_PC . ")!=0
+                group by ContactInfo.contactId");
 $rev_count = array();
 while (($row = edb_row($result)))
     $rev_count[$row[0]] = $row[1];

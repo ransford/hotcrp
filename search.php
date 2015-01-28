@@ -1,6 +1,6 @@
 <?php
 // search.php -- HotCRP paper search page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 require_once("src/initweb.php");
@@ -75,7 +75,7 @@ if (($getaction == "paper" || $getaction == "final"
     $result = $Conf->qe($Conf->paperQuery($Me, array("paperId" => SearchActions::selection())));
     $downloads = array();
     while (($row = PaperInfo::fetch($result, $Me))) {
-        if (!$Me->canViewPaper($row, $whyNot, true))
+        if (($whyNot = $Me->perm_view_paper($row, true)))
             $Conf->errorMsg(whyNotText($whyNot, "view"));
         else
             $downloads[] = $row->paperId;
@@ -109,7 +109,7 @@ if ($getaction == "abstract" && SearchActions::any() && defval($_REQUEST, "ajax"
     $texts = array();
     list($tmap, $tomap) = array($Conf->topic_map(), $Conf->topic_order_map());
     while ($prow = PaperInfo::fetch($result, $Me)) {
-        if (!$Me->canViewPaper($prow, $whyNot))
+        if (($whyNot = $Me->perm_view_paper($prow)))
             $Conf->errorMsg(whyNotText($whyNot, "view"));
         else {
             $text = "===========================================================================\n";
@@ -237,12 +237,12 @@ if (($getaction == "revform" || $getaction == "revformz")
     $texts = array();
     $errors = array();
     while (($row = PaperInfo::fetch($result, $Me))) {
-        $canreview = $Me->canReview($row, null, $whyNot);
-        if (!$canreview && !isset($whyNot["deadline"])
+        $whyNot = $Me->perm_review($row, null);
+        if ($whyNot && !isset($whyNot["deadline"])
             && !isset($whyNot["reviewNotAssigned"]))
             $errors[whyNotText($whyNot, "review")] = true;
         else {
-            if (!$canreview) {
+            if ($whyNot) {
                 $t = whyNotText($whyNot, "review");
                 $errors[$t] = false;
                 if (!isset($whyNot["deadline"]))
@@ -266,7 +266,7 @@ if (($getaction == "rev" || $getaction == "revz") && SearchActions::any()) {
     if ($Me->privChair)
         $_REQUEST["forceShow"] = 1;
     while (($row = PaperInfo::fetch($result, $Me))) {
-        if (!$Me->canViewReview($row, null, null, $whyNot))
+        if (($whyNot = $Me->perm_view_review($row, null, null)))
             $errors[whyNotText($whyNot, "view review")] = true;
         else if ($row->reviewSubmitted) {
             $rf = ReviewForm::get($row);
@@ -276,7 +276,7 @@ if (($getaction == "rev" || $getaction == "revz") && SearchActions::any()) {
 
     $crows = $Conf->comment_rows($Conf->paperQuery($Me, array("paperId" => SearchActions::selection(), "allComments" => 1, "reviewerName" => 1)), $Me);
     foreach ($crows as $row)
-        if ($Me->canViewComment($row, $row, null)) {
+        if ($Me->can_view_comment($row, $row, null)) {
             $crow = new CommentInfo($row, $row);
             defappend($texts[$row->paperId], $crow->unparse_text($Me) . "\n");
         }
@@ -352,7 +352,7 @@ if ($getaction == "votes" && SearchActions::any() && defval($_REQUEST, "tag")
         $result = $Conf->qe($Conf->paperQuery($Me, array("paperId" => SearchActions::selection(), "tagIndex" => $tag)));
         $texts = array();
         while (($row = PaperInfo::fetch($result, $Me)))
-            if ($Me->canViewTags($row, true))
+            if ($Me->can_view_tags($row, true))
                 arrayappend($texts[$row->paperId], array($showtag, (int) $row->tagIndex, $row->paperId, $row->title));
         downloadCSV(SearchActions::reorder($texts), array("tag", "votes", "paper", "title"), "votes");
         exit;
@@ -371,8 +371,8 @@ if ($getaction == "rank" && SearchActions::any() && defval($_REQUEST, "tag")
         $real = "";
         $null = "\n";
         while (($row = PaperInfo::fetch($result, $Me)))
-            if ($settingrank ? $Me->canSetRank($row)
-                : $Me->canSetTags($row, true)) {
+            if ($settingrank ? $Me->can_set_rank($row)
+                : $Me->can_set_tags($row, true)) {
                 if ($row->tagIndex === null)
                     $null .= "X\t$row->paperId\t$row->title\n";
                 else if ($real === "" || $lastIndex == $row->tagIndex - 1)
@@ -603,7 +603,7 @@ if ($getaction == "scores" && $Me->isPC && SearchActions::any()) {
         $_REQUEST["forceShow"] = 1;
     $texts = array();
     while (($row = PaperInfo::fetch($result, $Me))) {
-        if (!$Me->canViewReview($row, null, null, $whyNot))
+        if (($whyNot = $Me->perm_view_review($row, null, null)))
             $errors[] = whyNotText($whyNot, "view review") . "<br />";
         else if ($row->reviewSubmitted) {
             $a = array($row->paperId, $row->title);
@@ -612,7 +612,7 @@ if ($getaction == "scores" && $Me->isPC && SearchActions::any()) {
             $a[] = $row->outcome;
             foreach ($score_fields as $field => $f)
                 $a[] = $f->unparse_value($row->$field);
-            if ($Me->canViewReviewerIdentity($row, $row, null)) {
+            if ($Me->can_view_review_identity($row, $row, null)) {
                 $a[] = $row->reviewEmail;
                 $a[] = trim($row->reviewFirstName . " " . $row->reviewLastName);
             }
@@ -712,7 +712,7 @@ if ($getaction == "topics" && SearchActions::any()) {
     $tomap = $Conf->topic_order_map();
 
     while (($row = PaperInfo::fetch($result, $Me))) {
-        if (!$Me->canViewPaper($row))
+        if (!$Me->can_view_paper($row))
             continue;
         $out = array();
         $topicIds = ($row->topicIds == "" ? "x" : $row->topicIds);
@@ -847,7 +847,7 @@ if ($getaction == "metajson" && SearchActions::any() && $Me->privChair) {
 // set outcome for selected papers
 if (isset($_REQUEST["setdecision"]) && defval($_REQUEST, "decision", "") != ""
     && SearchActions::any() && check_post())
-    if (!$Me->canSetOutcome(null))
+    if (!$Me->can_set_decision(null))
         $Conf->errorMsg("You cannot set paper decisions.");
     else {
         $o = cvtint(@$_REQUEST["decision"]);
@@ -1262,7 +1262,7 @@ if ($pl) {
         displayOptionCheckbox("rownum", 1, "Row numbers", array("onchange" => "fold('pl',!this.checked,'rownum')"));
 
     // Reviewers group
-    if ($Me->canViewReviewerIdentity(true, null, null))
+    if ($Me->can_view_review_identity(true, null, null))
         displayOptionCheckbox("reviewers", 2, "Reviewers");
     if ($Me->privChair) {
         displayOptionCheckbox("allrevpref", 2, "Review preferences");

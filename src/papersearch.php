@@ -1,6 +1,6 @@
 <?php
 // papersearch.php -- HotCRP helper class for searching for papers
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class SearchOperator {
@@ -254,7 +254,7 @@ class PaperSearch {
     var $limitName;
     var $qt;
     var $allowAuthor;
-    var $fields;
+    private $fields;
     var $orderTags = array();
     private $_reviewer;
     private $_reviewer_fixed;
@@ -723,18 +723,43 @@ class PaperSearch {
         }
     }
 
-    function _searchComment($word, $ctype, &$qt, $quoted) {
+    function _search_comment($word, $ctype, &$qt, $quoted) {
+        global $Conf;
         $m = self::_matchCompar($word, $quoted);
         if (($type = self::_comparTautology($m))) {
             $qt[] = new SearchTerm($type);
             return;
         }
 
+        // canonicalize comment type
+        $ctype = strtolower($ctype);
+        if (str_ends_with($ctype, "resp"))
+            $ctype .= "onse";
+        if (str_ends_with($ctype, "-draft"))
+            $ctype = "draft" . substr($ctype, 0, strlen($ctype) - 6);
+        else if (str_ends_with($ctype, "draft"))
+            $ctype = "draft" . substr($ctype, 0, strlen($ctype) - 5);
+        if (str_starts_with($ctype, "draft-"))
+            $ctype = "draft" . substr($ctype, 6);
+
         $rt = 0;
-        if ($ctype == "response" || $ctype == "anycmt" || $ctype == "draftresponse" || $ctype == "responsedraft")
-            $rt |= self::F_ALLOWRESPONSE;
-        if ($ctype == "draftresponse")
+        $round = null;
+        if (str_starts_with($ctype, "draft") && str_ends_with($ctype, "response")) {
             $rt |= self::F_REQUIREDRAFT | self::F_ALLOWDRAFT;
+            $ctype = substr($ctype, 5);
+        }
+        if ($ctype == "response" || $ctype == "anycmt")
+            $rt |= self::F_ALLOWRESPONSE;
+        else if (str_ends_with($ctype, "response")) {
+            $rname = substr($ctype, 0, strlen($ctype) - 8);
+            $round = $Conf->resp_round_number($rname);
+            if ($round === false) {
+                $this->warn("No such response round “" . htmlspecialchars($ctype) . "”.");
+                $qt[] = new SearchTerm("f");
+                return;
+            }
+            $rt |= self::F_ALLOWRESPONSE;
+        }
         if ($ctype == "cmt" || $ctype == "aucmt" || $ctype == "anycmt")
             $rt |= self::F_ALLOWCOMMENT;
         if ($ctype == "aucmt")
@@ -745,6 +770,8 @@ class PaperSearch {
                 $rt |= ($this->privChair ? 0 : self::F_NONCONFLICT) | self::F_XVIEW;
                 $value = new SearchReviewValue($m[1], $tag !== "none" ? $tag : "any");
                 $term = new SearchTerm("cmttag", $rt, $value);
+                if ($round !== null)
+                    $term->commentRound = $round;
                 if ($tag === "none")
                     $term = SearchTerm::combine("not", $term);
                 $qt[] = $term;
@@ -756,7 +783,10 @@ class PaperSearch {
         }
         $contacts = ($m[0] == "" ? null : $contacts = $this->_reviewerMatcher($m[0], $quoted, false));
         $value = new SearchReviewValue($m[1], $contacts);
-        $qt[] = new SearchTerm("cmt", $rt | self::F_XVIEW, $value);
+        $term = new SearchTerm("cmt", $rt | self::F_XVIEW, $value);
+        if ($round !== null)
+            $term->commentRound = $round;
+        $qt[] = $term;
     }
 
     function _searchReviews($word, $rf, $field, &$qt, $quoted,
@@ -983,7 +1013,7 @@ class PaperSearch {
         }
     }
 
-    function _searchOptions($word, &$qt, $report_error) {
+    function _search_options($word, &$qt, $report_error) {
         if (preg_match('/\A(.*?)([:#][<>!=]?=?|[<>!=]=?)(.*)\z/', $word, $m)) {
             $oname = $m[1];
             if ($m[2][0] == ":" || $m[2][0] == "#")
@@ -1073,24 +1103,33 @@ class PaperSearch {
         return true;
     }
 
-    private function _searchHas($word, &$qt, $quoted) {
-        $wordkw = @self::$_keywords[$word] ? : "";
+    private function _search_has($word, &$qt, $quoted) {
+        global $Conf;
+        $lword = strtolower($word);
+        $word = @self::$_keywords[$lword] ? : $word;
         if (strcasecmp($word, "paper") == 0 || strcasecmp($word, "submission") == 0)
             $qt[] = new SearchTerm("pf", 0, array("paperStorageId", "!=0"));
         else if (strcasecmp($word, "final") == 0 || strcasecmp($word, "finalcopy") == 0)
             $qt[] = new SearchTerm("pf", 0, array("finalPaperStorageId", "!=0"));
         else if (strcasecmp($word, "abstract") == 0)
             $qt[] = new SearchTerm("pf", 0, array("abstract", "!=''"));
-        else if (preg_match('/\A(?:cmt|aucmt|anycmt|response|draftresponse)\z/', $wordkw))
-            $this->_searchComment(">0", $wordkw, $qt, $quoted);
+        else if (preg_match('/\A(?:(?:draft-?)?\w*resp(?:onse)?|\w*resp(?:onse)(?:-?draft)?|cmt|aucmt|anycmt)\z/i', $word))
+            $this->_search_comment(">0", $word, $qt, $quoted);
         else if (strcasecmp($word, "manager") == 0 || strcasecmp($word, "admin") == 0 || strcasecmp($word, "administrator") == 0)
             $qt[] = new SearchTerm("pf", 0, array("managerContactId", "!=0"));
-        else if (preg_match('/\A[ci]?(?:re|pri|sec|ext)\z/', $wordkw))
-            $this->_searchReviewer(">0", $wordkw, $qt, $quoted);
-        else if (preg_match('/\A\w+\z/', $word) && $this->_searchOptions("$word:yes", $qt, false))
+        else if (preg_match('/\A[ci]?(?:re|pri|sec|ext)\z/', $word))
+            $this->_searchReviewer(">0", $word, $qt, $quoted);
+        else if (preg_match('/\A\w+\z/', $word) && $this->_search_options("$word:yes", $qt, false))
             /* OK */;
         else {
-            $this->warn("Valid “has:” searches include “paper”, “final”, “abstract”, “comment”, “aucomment”, “response”, “draftresponse”, “pcrev”, and “extrev”.");
+            $x = array("“paper”", "“final”", "“abstract”", "“comment”", "“aucomment”", "“pcrev”", "“extrev”");
+            foreach ($Conf->resp_round_list() as $i => $rname) {
+                if (!in_array("“response”", $x))
+                    array_push($x, "“response”", "“draftresponse”");
+                if ($i)
+                    $x[] = "“{$rname}response”";
+            }
+            $this->warn("Unknown “has:” search. I understand " . commajoin($x) . ".");
             $qt[] = new SearchTerm("f");
         }
     }
@@ -1270,17 +1309,14 @@ class PaperSearch {
         }
 
         $keyword = null;
-        if (($colon = strpos($word, ':')) !== false) {
+        if (($colon = strpos($word, ":")) > 0) {
             $x = substr($word, 0, $colon);
-            if (isset(self::$_keywords[$x])) {
-                $keyword = self::$_keywords[$x];
+            if (strpos($x, '"') === false) {
+                $keyword = @self::$_keywords[$x] ? : $x;
                 $word = substr($word, $colon + 1);
-            } else if (strpos($x, '"') === false) {
-                $keyword = $x;
-                $word = substr($word, $colon + 1);
+                if ($word === false)
+                    $word = "";
             }
-            if ($word === false)
-                $word = "";
         }
 
         // Treat unquoted "*", "ANY", and "ALL" as special; return true.
@@ -1293,7 +1329,7 @@ class PaperSearch {
         $negated = false;
         if ($quoted)
             $word = str_replace(array('"', '*'), array('', '\*'), $word);
-        if ($keyword ? $keyword == "notag" : isset($this->fields["notag"])) {
+        if ($keyword == "notag") {
             $keyword = "tag";
             $negated = true;
         }
@@ -1310,14 +1346,12 @@ class PaperSearch {
         foreach (array("re", "cre", "ire", "pri", "cpri", "ipri", "sec", "csec", "isec", "ext", "cext", "iext") as $rtype)
             if ($keyword ? $keyword == $rtype : isset($this->fields[$rtype]))
                 $this->_searchReviewer($word, $rtype, $qt, $quoted);
-        foreach (array("cmt", "aucmt", "anycmt", "response", "draftresponse") as $ctype)
-            if ($keyword ? $keyword == $ctype : isset($this->fields[$ctype]))
-                $this->_searchComment($word, $ctype, $qt, $quoted);
-        if (($keyword ? $keyword == "revpref" : isset($this->fields["revpref"]))
-            && $this->amPC)
+        if (preg_match('/\A(?:(?:draft-?)?\w*resp(?:onse)|\w*resp(?:onse)?(-?draft)?|cmt|aucmt|anycmt)\z/', $keyword))
+            $this->_search_comment($word, $keyword, $qt, $quoted);
+        if ($keyword == "revpref" && $this->amPC)
             $this->_search_revpref($word, $qt, $quoted);
         foreach (array("lead", "shepherd", "manager") as $ctype)
-            if ($keyword ? $keyword == $ctype : isset($this->fields[$ctype])) {
+            if ($keyword == $ctype) {
                 $x = $this->_one_pc_matcher($word, $quoted);
                 $qt[] = new SearchTerm("pf", self::F_XVIEW, array("${ctype}ContactId", $x));
                 if ($ctype == "manager" && $word == "me" && !$quoted && $this->privChair)
@@ -1326,7 +1360,7 @@ class PaperSearch {
         if (($keyword ? $keyword == "tag" : isset($this->fields["tag"]))
             || $keyword == "order" || $keyword == "rorder")
             $this->_searchTags($word, $keyword, $qt);
-        if (($keyword ? $keyword == "topic" : isset($this->fields["topic"]))) {
+        if ($keyword == "topic") {
             $type = "topic";
             $value = null;
             if ($word == "none" || $word == "any")
@@ -1345,9 +1379,9 @@ class PaperSearch {
             }
             $qt[] = new SearchTerm($type, self::F_XVIEW, $value);
         }
-        if (($keyword ? $keyword == "option" : isset($this->fields["option"])))
-            $this->_searchOptions($word, $qt, true);
-        if ($keyword ? $keyword == "status" : isset($this->fields["status"])) {
+        if ($keyword == "option")
+            $this->_search_options($word, $qt, true);
+        if ($keyword == "status") {
             if (strcasecmp($word, "withdrawn") == 0 || strcasecmp($word, "withdraw") == 0 || strcasecmp($word, "with") == 0)
                 $qt[] = new SearchTerm("pf", 0, array("timeWithdrawn", ">0"));
             else if (strcasecmp($word, "submitted") == 0 || strcasecmp($word, "submit") == 0 || strcasecmp($word, "sub") == 0)
@@ -1359,19 +1393,15 @@ class PaperSearch {
             else
                 $this->_search_decision($word, $qt, $quoted, true);
         }
-        if ($keyword ? $keyword == "decision" : isset($this->fields["decision"]))
+        if ($keyword == "decision")
             $this->_search_decision($word, $qt, $quoted, false);
-        if (($keyword ? $keyword == "conflict" : isset($this->fields["conflict"]))
-            && $this->amPC)
+        if ($keyword == "conflict" && $this->amPC)
             $this->_search_conflict($word, $qt, $quoted, false);
-        if (($keyword ? $keyword == "pcconflict" : isset($this->fields["pcconflict"]))
-            && $this->amPC)
+        if ($keyword == "pcconflict" && $this->amPC)
             $this->_search_conflict($word, $qt, $quoted, true);
-        if (($keyword ? $keyword == "reconflict" : isset($this->fields["reconflict"]))
-            && $this->privChair)
+        if ($keyword == "reconflict" && $this->privChair)
             $this->_searchReviewerConflict($word, $qt, $quoted);
-        if (($keyword ? $keyword == "round" : isset($this->fields["round"]))
-            && $this->amPC) {
+        if ($keyword == "round" && $this->amPC) {
             $this->reviewAdjust = true;
             if ($word == "none")
                 $qt[] = new SearchTerm("revadj", 0, array("round" => array(0)));
@@ -1387,13 +1417,13 @@ class PaperSearch {
                     $qt[] = new SearchTerm("revadj", 0, array("round" => $rounds));
             }
         }
-        if ($keyword ? $keyword == "rate" : isset($this->fields["rate"]))
+        if ($keyword == "rate")
             $this->_searchReviewRatings($word, $qt);
-        if ($keyword ? $keyword == "has" : isset($this->fields["has"]))
-            $this->_searchHas($word, $qt, $quoted);
+        if ($keyword == "has")
+            $this->_search_has($word, $qt, $quoted);
         if ($keyword == "formula")
             $this->_search_formula($word, $qt, $quoted);
-        if ($keyword ? $keyword == "ss" : isset($this->fields["ss"])) {
+        if ($keyword == "ss") {
             if (($nextq = self::_expand_saved_search($word, $this->_ssRecursion))) {
                 $this->_ssRecursion[$word] = true;
                 $qe = $this->_searchQueryType($nextq);
@@ -1441,7 +1471,7 @@ class PaperSearch {
             $rf = reviewForm();
             if (($field = $rf->unabbreviateField($keyword)))
                 $this->_searchReviews($word, $rf, $field, $qt, $quoted);
-            else if (!$this->_searchOptions("$keyword:$word", $qt, false)
+            else if (!$this->_search_options("$keyword:$word", $qt, false)
                      && $report_error)
                 $this->warn("Unrecognized keyword “" . htmlspecialchars($keyword) . "”.");
         }
@@ -1468,22 +1498,22 @@ class PaperSearch {
                 $str = $m[2] . $str;
         }
 
-        // allow a space after a keyword
-        if (($colon = strpos($word, ":")) !== false) {
+        // check for keyword
+        $keyword = false;
+        if (($colon = strpos($word, ":")) > 0) {
             $x = substr($word, 0, $colon);
-            if ((isset(self::$_keywords[$x]) || strpos($x, '"') === false)
-                && strlen($word) <= $colon + 1) {
-                if (preg_match($wordre, $str, $m)) {
-                    $word .= $m[0];
-                    $str = substr($str, strlen($m[0]));
-                }
-            }
+            if (strpos($x, '"') === false)
+                $keyword = @self::$_keywords[$x] ? : $x;
+        }
+
+        // allow a space after a keyword
+        if ($keyword && strlen($word) <= $colon + 1 && preg_match($wordre, $str, $m)) {
+            $word .= $m[0];
+            $str = substr($str, strlen($m[0]));
         }
 
         // "show:" may be followed by a parenthesized expression
-        $keyword = ($colon !== false ? substr($word, 0, $colon) : "");
-        $keyword = @self::$_keywords[$keyword];
-        if (substr($str, 0, 1) === "(" && $keyword
+        if ($keyword && substr($str, 0, 1) === "("
             && substr($word, $colon + 1, 1) !== "\""
             && ($keyword === "show" || $keyword === "showsort"
                 || $keyword === "sort" || $keyword === "formula")) {
@@ -1959,7 +1989,7 @@ class PaperSearch {
             $q[] = "false";
     }
 
-    private function _clauseTermSetField(&$t, $field, $sqi, &$f) {
+    private function _clauseTermSetField($t, $field, $sqi, &$f) {
         $this->needflags |= $t->flags;
         $v = $t->value;
         if ($v != "" && $v[0] == "*")
@@ -1986,7 +2016,7 @@ class PaperSearch {
         $this->needflags |= self::F_XVIEW;
     }
 
-    private function _clauseTermSetTable(&$t, $value, $compar, $shorttab,
+    private function _clauseTermSetTable($t, $value, $compar, $shorttab,
                                          $table, $field, $where, $sqi, &$f) {
         // see also first "tag" case below
         $q = array();
@@ -2079,7 +2109,7 @@ class PaperSearch {
         $where[] = $rate;
     }
 
-    private function _clauseTermSetReviews($thistab, $extrawhere, &$t, $sqi) {
+    private function _clauseTermSetReviews($thistab, $extrawhere, $t, $sqi) {
         if (!isset($sqi->tables[$thistab])) {
             $where = array();
             $reviewtable = "PaperReview r";
@@ -2116,7 +2146,7 @@ class PaperSearch {
         return "(" . join(" and ", $q) . ")";
     }
 
-    private function _clauseTermSetRevpref($thistab, $extrawhere, &$t, $sqi) {
+    private function _clauseTermSetRevpref($thistab, $extrawhere, $t, $sqi) {
         if (!isset($sqi->tables[$thistab])) {
             $where = array();
             $reviewtable = "PaperReviewPreference";
@@ -2135,7 +2165,7 @@ class PaperSearch {
         return "(" . join(" and ", $q) . ")";
     }
 
-    private function _clauseTermSetComments($thistab, $extrawhere, &$t, $sqi) {
+    private function _clauseTermSetComments($thistab, $extrawhere, $t, $sqi) {
         global $Conf;
         if (!isset($sqi->tables[$thistab])) {
             $where = array();
@@ -2149,6 +2179,8 @@ class PaperSearch {
                 $where[] = "(commentType&" . COMMENTTYPE_DRAFT . ")!=0";
             if ($t->flags & self::F_AUTHORCOMMENT)
                 $where[] = "commentType>=" . COMMENTTYPE_AUTHOR;
+            if (@$t->commentRound !== null)
+                $where[] = "commentRound=" . $t->commentRound;
             if ($extrawhere)
                 $where[] = $extrawhere;
             $wheretext = "";
@@ -2217,6 +2249,8 @@ class PaperSearch {
             else {
                 $rtype = $t->flags & (self::F_ALLOWCOMMENT | self::F_ALLOWRESPONSE | self::F_AUTHORCOMMENT | self::F_ALLOWDRAFT | self::F_REQUIREDRAFT);
                 $thistab = "Numcomments_" . $rtype;
+                if (@$t->commentRound !== null)
+                    $thistab .= "_" . $t->commentRound;
             }
             $f[] = $this->_clauseTermSetComments($thistab, $t->value->contactWhere("contactId"), $t, $sqi);
         } else if ($tt == "cmttag") {
@@ -2321,16 +2355,16 @@ class PaperSearch {
         if (($flags & self::F_NONCONFLICT) && $row->conflictType)
             return false;
         if ($flags & self::F_XVIEW) {
-            if (!$this->contact->canViewPaper($row))
+            if (!$this->contact->can_view_paper($row))
                 return false;
-            if ($t->type == "tag" && !$this->contact->canViewTags($row, true))
+            if ($t->type == "tag" && !$this->contact->can_view_tags($row, true))
                 return false;
             if (($t->type == "au" || $t->type == "au_cid" || $t->type == "co"
                  || $t->type == "conflict")
                 && !$this->contact->allow_view_authors($row))
                 return false;
             if ($t->type == "pf" && $t->value[0] == "outcome"
-                && !$this->contact->canViewDecision($row, true))
+                && !$this->contact->can_view_decision($row, true))
                 return false;
             if ($t->type == "option"
                 && !$this->contact->can_view_paper_option($row, $t->value[0], true))
@@ -2344,10 +2378,10 @@ class PaperSearch {
                     if ($info != "") {
                         list($rrow->reviewId, $rrow->contactId, $rrow->reviewType, $rrow->reviewSubmitted, $rrow->reviewNeedsSubmit, $rrow->requestedBy, $rrow->reviewToken, $rrow->reviewBlind) = explode(" ", $info);
                         if (($count_only
-                             ? $this->contact->canCountReview($row, $rrow, true)
-                             : $this->contact->canViewReview($row, $rrow, true))
+                             ? $this->contact->can_count_review($row, $rrow, true)
+                             : $this->contact->can_view_review($row, $rrow, true))
                             && (!$t->value->contactsql
-                                || $this->contact->canViewReviewerIdentity($row, $rrow, true))
+                                || $this->contact->can_view_review_identity($row, $rrow, true))
                             && (!isset($t->value->view_score)
                                 || $t->value->view_score > $this->contact->viewReviewFieldsScore($row, $rrow)))
                             ++$row->$fieldname;
@@ -2361,7 +2395,7 @@ class PaperSearch {
                 foreach (explode(",", defval($row, $fieldname . "_info", "")) as $info)
                     if ($info != "") {
                         list($crow->contactId, $crow->commentType) = explode(" ", $info);
-                        if ($this->contact->canViewComment($row, $crow, true))
+                        if ($this->contact->can_view_comment($row, $crow, true))
                             ++$row->$fieldname;
                     }
             }
@@ -2645,14 +2679,13 @@ class PaperSearch {
                 } else
                     $qm = "(firstName like '%$cm->sql%' or lastName like '%$cm->sql%' or email like '%$cm->sql%')";
                 if ($cm->pc_only)
-                    $qm = "($qm and PCMember.contactId is not null)";
+                    $qm = "($qm and (roles&" . Contact::ROLE_PC . ")!=0)";
                 $qterm[] = $qm;
                 $cm->ids = array();
             }
             $q = "select ContactInfo.contactId, "
                 . (count($qterm) == 1 ? "true" : join(", ", $qterm))
-                . " from ContactInfo left join PCMember using (contactId)"
-                . " where " . join(" or ", $qterm);
+                . " from ContactInfo where " . join(" or ", $qterm);
             //$Conf->infoMsg(Ht::pre_text_wrap($q));
             $result = $Conf->q($q);
             while (($row = edb_row($result)))
@@ -2687,7 +2720,7 @@ class PaperSearch {
         //$Conf->infoMsg(Ht::pre_text_wrap($q));
 
         // actually perform query
-        $result = Dbl::raw_qe($q);
+        $result = Dbl::qe_raw($q);
         if (!$result)
             return ($this->_matches = false);
         $this->_matches = array();
@@ -2699,7 +2732,7 @@ class PaperSearch {
             $delete = array();
             $qe_heading = $qe->get_float("heading");
             while (($row = PaperInfo::fetch($result, $this->cid))) {
-                if (!$this->contact->canViewPaper($row)
+                if (!$this->contact->can_view_paper($row)
                     || ($limit == "rable"
                         && !$limitcontact->allow_review_assignment_ignore_conflict($row)))
                     $x = false;

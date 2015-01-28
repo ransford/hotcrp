@@ -1,6 +1,6 @@
 <?php
 // contactlist.php -- HotCRP helper class for producing lists of contacts
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 global $ConfSitePATH;
@@ -314,7 +314,7 @@ class ContactList extends BaseList {
             $c = "";
             if ($fieldId == self::FIELD_SELECTOR_ON)
                 $c = " checked='checked'";
-            return "<input type='checkbox' class='cb' name='pap[]' value='$row->contactId' tabindex='1' id='psel$this->count' onclick='pselClick(event,this)' $c/>";
+            return "<input type='checkbox' class='cb' name='pap[]' value='$row->contactId' tabindex='1' id='psel$this->count' onclick='rangeclick(event,this)' $c/>";
         case self::FIELD_HIGHTOPICS:
         case self::FIELD_LOWTOPICS:
             if (!defval($row, "topicIds"))
@@ -484,8 +484,7 @@ class ContactList extends BaseList {
         $t .= "    <td id='pplact' class='pl_footer linelinks1' colspan='" . ($ncol - 1) . "'><b>Select people</b> (or <a href='javascript:void papersel(true)'>select all " . $this->count . "</a>), then ";
 
         // Begin linelinks
-        $types = array("nameemail" => "Names and emails",
-                       "address" => "Addresses");
+        $types = array("nameemail" => "Names and emails");
         if ($this->contact->privChair)
             $types["pcinfo"] = "PC info";
         $t .= "<span class='lll1'><a href='#' onclick='return crpfocus(\"pplact\",1)'>Download</a></span><span class='lld1'><b>:</b> &nbsp;"
@@ -542,8 +541,6 @@ class ContactList extends BaseList {
             $pq .= ",\n\tgroup_concat(PaperConflict.paperId) as paperIds";
 
         $pq .= "\n      from ContactInfo u\n";
-        if ($this->limit == "pc")
-            $pq .= "\tjoin PCMember on (PCMember.contactId=u.contactId)\n";
         if (isset($queryOptions['topics']))
             $pq .= "    left join (select contactId, group_concat(topicId) as topicIds, group_concat(interest) as topicInterest
                 from TopicInterest
@@ -620,6 +617,8 @@ class ContactList extends BaseList {
         $mainwhere = array();
         if (isset($queryOptions["where"]))
             $mainwhere[] = $queryOptions["where"];
+        if ($this->limit == "pc")
+            $mainwhere[] = "(u.roles&" . Contact::ROLE_PC . ")!=0";
         if ($this->limit == "admin")
             $mainwhere[] = "(u.roles&" . (Contact::ROLE_ADMIN | Contact::ROLE_CHAIR) . ")!=0";
         if ($this->limit == "pcadmin" || $this->limit == "pcadminx")
@@ -824,7 +823,6 @@ class ContactList extends BaseList {
 
         $x .= $body;
 
-        $x .= "  <tr class='pl_footgap $trclass'><td class='pl_blank' colspan='$ncol'></td></tr>\n";
         reset($fieldDef);
         if (key($fieldDef) == self::FIELD_SELECTOR)
             $x .= $this->footer($ncol);

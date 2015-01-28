@@ -1,6 +1,6 @@
 <?php
 // documenthelper.php -- generic document helper class
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class ZipDocument {
@@ -174,7 +174,7 @@ class DocumentHelper {
             $q = "update $table set " . join(",", $a) . " where $idcol='" . sqlq($cols[$idcol]);
         else
             $q = "insert into $table set " . join(",", $a);
-        if (!($result = Dbl::raw_query($q))) {
+        if (!($result = Dbl::query_raw($q))) {
             set_error_html($doc, $Conf->db_error_html(true, $while));
             return;
         }

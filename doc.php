@@ -1,6 +1,6 @@
 <?php // -*- mode: php -*-
 // doc -- HotCRP paper download page
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 // A PHP script where execution is specified in .htaccess, so the requested
@@ -55,7 +55,7 @@ else {
 if (!isset($Error)
     && !($prow = $Conf->paperRow($paperId, $Me, $whyNot)))
     $Error = whyNotText($whyNot, "view");
-if (!isset($Error) && !$Me->can_view_pdf($prow, $whyNot))
+if (!isset($Error) && ($whyNot = $Me->perm_view_pdf($prow)))
     $Error = whyNotText($whyNot, "view");
 if (!isset($Error) && $documentType > 0
     && !$Me->can_view_paper_option($prow, $documentType, true))

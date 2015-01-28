@@ -1,6 +1,6 @@
 <?php
 // commentinfo.php -- HotCRP helper class for comments
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class CommentViewState {
@@ -16,8 +16,6 @@ class CommentInfo {
 
 
     function __construct($x = null, $prow = null) {
-        if (is_int($x))
-            $this->commentType = $x;
         $this->merge(is_object($x) ? $x : null);
         $this->prow = $prow;
     }
@@ -28,6 +26,7 @@ class CommentInfo {
                 $this->$k = $v;
         $this->commentId = (int) @$this->commentId;
         $this->commentType = (int) @$this->commentType;
+        $this->commentRound = (int) @$this->commentRound;
     }
 
     static public function fetch($result, $prow) {
@@ -39,14 +38,22 @@ class CommentInfo {
         global $Conf, $Me;
         if (Ht::mark_stash("papercomment")) {
             $t = array("papercomment.commenttag_search_url=\"" . hoturl_raw("search", "q=cmt%3A%23\$") . "\"");
-            if ($Conf->timeAuthorRespond() || $Me->allow_administer($prow)) {
-                $wordlimit = $Conf->setting("resp_words", 500);
-                if ($wordlimit > 0)
-                    $t[] = "papercomment.resp_words=$wordlimit";
-                if ($Me->canRespond($prow, null))
-                    $t[] = "papercomment.responseinstructions=" . json_encode($Conf->message_html("responseinstructions", array("wordlimit" => $wordlimit)));
-                if (!$prow->has_author($Me))
-                    $t[] = "papercomment.nonauthor=true";
+            if (!$prow->has_author($Me))
+                $t[] = "papercomment.nonauthor=true";
+            foreach ($Conf->resp_round_list() as $i => $rname) {
+                $isuf = $i ? "_$i" : "";
+                $wl = $Conf->setting("resp_words$isuf", 500);
+                $j = array("words" => $wl);
+                $ix = false;
+                if ($Me->can_respond($prow, (object) array("commentType" => COMMENTTYPE_RESPONSE, "commentRound" => $i))) {
+                    if ($i)
+                        $ix = $Conf->message_html("resp_instrux_$i", array("wordlimit" => $wl));
+                    if ($ix === false)
+                        $ix = $Conf->message_html("resp_instrux", array("wordlimit" => $wl));
+                    if ($ix !== false)
+                        $j["instrux"] = $ix;
+                }
+                $t[] = "papercomment.set_resp_round(" . json_encode($i ? $rname : 1) . "," . json_encode($j) . ")";
             }
             $Conf->echoScript(join($t, ";"));
         }
@@ -79,24 +86,22 @@ class CommentInfo {
 
     public function unparse_json($contact, $viewstate = null) {
         global $Conf;
-        if ($this->commentId && !$contact->canViewComment($this->prow, $this, null))
+        if ($this->commentId && !$contact->can_view_comment($this->prow, $this, null))
             return false;
 
         // placeholder for new comment
         if (!$this->commentId) {
-            if ($this->commentType & COMMENTTYPE_RESPONSE
-                ? !$contact->canRespond($this->prow, null)
-                : !$contact->canComment($this->prow, null))
+            if (!$contact->can_comment($this->prow, $this))
                 return false;
             $cj = (object) array("is_new" => true, "editable" => true);
             if ($this->commentType & COMMENTTYPE_RESPONSE)
-                $cj->response = true;
+                $cj->response = $Conf->resp_round_name($this->commentRound);
             return $cj;
         }
 
         // otherwise, viewable comment
         $cj = (object) array("cid" => $this->commentId);
-        if ($contact->canComment($this->prow, $this))
+        if ($contact->can_comment($this->prow, $this))
             $cj->editable = true;
         $cj->ordinal = $this->_ordinal($viewstate);
         $cj->visibility = self::$visibility_map[$this->commentType & COMMENTTYPE_VISIBILITY];
@@ -105,7 +110,7 @@ class CommentInfo {
         if ($this->commentType & COMMENTTYPE_DRAFT)
             $cj->draft = true;
         if ($this->commentType & COMMENTTYPE_RESPONSE)
-            $cj->response = true;
+            $cj->response = $Conf->resp_round_name($this->commentRound);
 
         // tags
         if (@$this->commentTags) {
@@ -117,8 +122,8 @@ class CommentInfo {
         }
 
         // identity and time
-        $idable = $contact->canViewCommentIdentity($this->prow, $this, null);
-        $idable_override = $idable || $contact->canViewCommentIdentity($this->prow, $this, true);
+        $idable = $contact->can_view_comment_identity($this->prow, $this, null);
+        $idable_override = $idable || $contact->can_view_comment_identity($this->prow, $this, true);
         if ($idable || $idable_override) {
             $user = $this->user();
             $cj->author = Text::user_html($user);
@@ -137,9 +142,15 @@ class CommentInfo {
     }
 
     public function unparse_text($contact, $no_title = false) {
+        global $Conf;
         $x = "===========================================================================\n";
-        $n = ($this->commentType & COMMENTTYPE_RESPONSE ? "Response" : "Comment");
-        if ($contact->canViewCommentIdentity($this->prow, $this, false))
+        if (!($this->commentType & COMMENTTYPE_RESPONSE))
+            $n = "Comment";
+        else if (($rname = $Conf->resp_round_text($this->commentRound)))
+            $n = "$rname Response";
+        else
+            $n = "Response";
+        if ($contact->can_view_comment_identity($this->prow, $this, false))
             $n .= " by " . Text::user_text($this->user());
         $x .= str_pad($n, (int) (37.5 + strlen(UnicodeHelper::deaccent($n)) / 2), " ", STR_PAD_LEFT) . "\n";
         if (!$no_title)
@@ -160,7 +171,7 @@ class CommentInfo {
         if (strlen($crow->shortTitle) != strlen($crow->title))
             $t .= "...";
         $t .= "</a>";
-        if ($contact->canViewCommentIdentity($crow, $crow, false))
+        if ($contact->can_view_comment_identity($crow, $crow, false))
             $t .= " &nbsp;<span class='barsep'>|</span>&nbsp; <span class='hint'>comment by</span> " . Text::user_html(self::_user($crow));
         $t .= " &nbsp;<span class='barsep'>|</span>&nbsp; <span class='hint'>posted</span> " . $Conf->parseableTime($crow->timeModified, false);
         $t .= "</small><br /><a class='q'" . substr($a, 3)
@@ -192,18 +203,21 @@ class CommentInfo {
             $ctype = $this->commentType;
         else // $req->visibility == "r" || $req->visibility == "rev"
             $ctype = COMMENTTYPE_REVIEWER;
-        if ($is_response ? $prow->blind : $Conf->is_review_blind(!!@$req->blind))
+        if ($is_response ? $this->prow->blind : $Conf->is_review_blind(!!@$req->blind))
             $ctype |= COMMENTTYPE_BLIND;
 
         // tags
-        if ($is_response)
+        if ($is_response) {
             $ctags = " response ";
-        else if (@$req->tags
+            if (($rname = $Conf->resp_round_name($this->commentRound)) != "1")
+                $ctags .= "{$rname}response ";
+        } else if (@$req->tags
                  && preg_match_all(',\S+,', $req->tags, $m)) {
             $tagger = new Tagger($contact);
             $ctags = array();
             foreach ($m[0] as $text)
-                if (($text = $tagger->check($text, Tagger::NOVALUE)))
+                if (($text = $tagger->check($text, Tagger::NOVALUE))
+                    && !stri_ends_with($text, "response"))
                     $ctags[] = $text;
             $tagger->sort($ctags);
             $ctags = count($ctags) ? " " . join(" ", $ctags) . " " : null;
@@ -229,12 +243,16 @@ class CommentInfo {
                 $qb[] = "?";
                 $qv[] = $ctags;
             }
+            if ($is_response) {
+                $qa[] = "commentRound";
+                $qb[] = $this->commentRound;
+            }
             $q = "insert into $Table (" . join(", ", $qa) . ") select " . join(", ", $qb) . "\n";
-            if ($ctype & COMMENTTYPE_RESPONSE) {
+            if ($is_response) {
                 // make sure there is exactly one response
                 $q .= " from (select $LinkTable.$LinkColumn, coalesce(commentId, 0) commentId
                 from $LinkTable
-                left join $Table on ($Table.$LinkColumn=$LinkTable.$LinkColumn and (commentType&" . COMMENTTYPE_RESPONSE . ")!=0)
+                left join $Table on ($Table.$LinkColumn=$LinkTable.$LinkColumn and (commentType&" . COMMENTTYPE_RESPONSE . ")!=0 and commentRound=$this->commentRound)
                 where $LinkTable.$LinkColumn={$this->prow->$LinkColumn} group by $LinkTable.$LinkColumn) t
         where t.commentId=0";
             }
@@ -254,7 +272,7 @@ class CommentInfo {
             $qv[] = $ctags;
         }
 
-        $result = Dbl::qe($q, $qv);
+        $result = Dbl::qe_apply($q, $qv);
         if (!$result)
             return false;
         $cmtid = $this->commentId ? : $result->insert_id;
@@ -313,7 +331,7 @@ class CommentInfo {
             $tmpl = "@responsenotify";
         else
             $tmpl = "@commentnotify";
-        if ($minic->canViewComment($prow, self::$watching, false)
+        if ($minic->can_view_comment($prow, self::$watching, false)
             // Don't send notifications about draft responses to the chair,
             // even though the chair can see draft responses.
             && ($tmpl !== "@responsedraftnotify" || $minic->actAuthorView($prow)))

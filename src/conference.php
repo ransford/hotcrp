@@ -1,6 +1,6 @@
 <?php
 // conference.php -- HotCRP central helper class (singleton)
-// HotCRP is Copyright (c) 2006-2014 Eddie Kohler and Regents of the UC
+// HotCRP is Copyright (c) 2006-2015 Eddie Kohler and Regents of the UC
 // Distributed under an MIT-like license; see LICENSE
 
 class Conference {
@@ -10,7 +10,7 @@ class Conference {
     var $settings;
     var $settingTexts;
     var $sversion;
-    private $deadline_cache = null;
+    private $_pc_seeall_cache = null;
 
     private $save_messages = true;
     var $headerPrinted = false;
@@ -68,7 +68,7 @@ class Conference {
         // load settings from database
         $this->settings = array();
         $this->settingTexts = array();
-        $this->deadline_cache = null;
+        $this->_pc_seeall_cache = null;
 
         $result = $this->q("select name, value, data from Settings");
         while ($result && ($row = $result->fetch_row())) {
@@ -82,9 +82,10 @@ class Conference {
                 $Opt[$okey] = ($row[2] === null ? $row[1] : $row[2]);
             }
         }
+        Dbl::free($result);
 
         // update schema
-        if ($this->settings["allowPaperOption"] < 82) {
+        if ($this->settings["allowPaperOption"] < 88) {
             require_once("updateschema.php");
             $oldOK = $OK;
             updateSchema($this);
@@ -142,8 +143,9 @@ class Conference {
 
     private function crosscheck_settings() {
         global $Opt;
+
         // enforce invariants
-        foreach (array("pcrev_any", "extrev_view", "rev_notifychair") as $x)
+        foreach (array("pcrev_any", "extrev_view") as $x)
             if (!isset($this->settings[$x]))
                 $this->settings[$x] = 0;
         if (!isset($this->settings["sub_blind"]))
@@ -160,11 +162,22 @@ class Conference {
             $this->settings["pc_seeblindrev"] = 1;
             $this->settings["pc_seeallrev"] = self::PCSEEREV_YES;
         }
+
+        // rounds
         $this->rounds = array("");
         if (isset($this->settingTexts["tag_rounds"])) {
             foreach (explode(" ", $this->settingTexts["tag_rounds"]) as $r)
                 if ($r != "")
                     $this->rounds[] = $r;
+        }
+
+        // review times
+        foreach ($this->rounds as $i => $rname) {
+            $suf = $i ? "_$i" : "";
+            if (!isset($this->settings["extrev_soft$suf"]) && isset($this->settings["pcrev_soft$suf"]))
+                $this->settings["extrev_soft$suf"] = $this->settings["pcrev_soft$suf"];
+            if (!isset($this->settings["extrev_hard$suf"]) && isset($this->settings["pcrev_hard$suf"]))
+                $this->settings["extrev_hard$suf"] = $this->settings["pcrev_hard$suf"];
         }
 
         // S3 settings
@@ -236,12 +249,24 @@ class Conference {
             $Opt["paperSite"] = $Opt["defaultPaperSite"];
         $Opt["paperSite"] = preg_replace('|/+\z|', "", $Opt["paperSite"]);
 
-        // set assetsURL
-        if (!@$Opt["assetsURL"])
-            $Opt["assetsURL"] = $ConfSiteBase;
-        if ($Opt["assetsURL"] !== "" && !str_ends_with($Opt["assetsURL"], "/"))
-            $Opt["assetsURL"] .= "/";
-        Ht::$img_base = $Opt["assetsURL"] . "images/";
+        // option name updates (backwards compatibility)
+        foreach (array("disableSlashURLs" => "disableSlashUrls", "assetsURL" => "assetsUrl",
+                       "jqueryURL" => "jqueryUrl", "jqueryCDN" => "jqueryCdn",
+                       "disableCSV" => "disableCsv") as $kold => $knew)
+            if (isset($Opt[$kold]) && !isset($Opt[$knew]))
+                $Opt[$knew] = $Opt[$kold];
+
+        // set assetsUrl and scriptAssetsUrl
+        if (!isset($Opt["scriptAssetsUrl"]) && isset($_SERVER["HTTP_USER_AGENT"])
+            && strpos($_SERVER["HTTP_USER_AGENT"], "MSIE") !== false)
+            $Opt["scriptAssetsUrl"] = $ConfSiteBase;
+        if (!isset($Opt["assetsUrl"]))
+            $Opt["assetsUrl"] = $ConfSiteBase;
+        if ($Opt["assetsUrl"] !== "" && !str_ends_with($Opt["assetsUrl"], "/"))
+            $Opt["assetsUrl"] .= "/";
+        if (!isset($Opt["scriptAssetsUrl"]))
+            $Opt["scriptAssetsUrl"] = $Opt["assetsUrl"];
+        Ht::$img_base = $Opt["assetsUrl"] . "images/";
 
         // set docstore from filestore
         if (@$Opt["docstore"] === true)
@@ -283,6 +308,8 @@ class Conference {
         return (is_string($x) ? json_decode($x) : $x);
     }
 
+
+
     function decision_map() {
         if ($this->_decisions === null) {
             $this->_decisions = array();
@@ -313,6 +340,8 @@ class Conference {
         else
             return false;
     }
+
+
 
     function topic_map() {
         $x = @$this->settingTexts["topic_map"];
@@ -355,6 +384,8 @@ class Conference {
         return count($this->topic_map());
     }
 
+
+
     function review_form_json($round) {
         $key = $round ? "review_form.$round" : "review_form";
         $x = @$this->settingTexts[$key];
@@ -362,6 +393,8 @@ class Conference {
             $x = $this->settingTexts[$key] = json_decode($x);
         return is_object($x) ? $x : null;
     }
+
+
 
     function has_tracks() {
         return $this->tracks !== null;
@@ -420,6 +453,8 @@ class Conference {
         return true;
     }
 
+
+
     function has_rounds() {
         return count($this->rounds) > 1;
     }
@@ -428,12 +463,25 @@ class Conference {
         return $this->rounds;
     }
 
-    function round_name($roundno, $expand) {
+    function round0_defined() {
+        return $this->setting("pcrev_soft") || $this->setting("pcrev_hard")
+            || $this->setting("extrev_soft") || $this->setting("extrev_hard");
+    }
+
+    function round_name($roundno, $expand = false) {
         if ($roundno > 0) {
-            if (($rtext = @$this->rounds[$roundno]) && $rtext !== ";")
-                return $rtext;
+            if (($rname = @$this->rounds[$roundno]) && $rname !== ";")
+                return $rname;
             else if ($expand)
                 return "?$roundno?"; /* should not happen */
+        }
+        return "";
+    }
+
+    function round_suffix($roundno) {
+        if ($roundno > 0) {
+            if (($rname = @$this->rounds[$roundno]) && $rname !== ";")
+                return "_$rname";
         }
         return "";
     }
@@ -441,12 +489,17 @@ class Conference {
     static function round_name_error($rname) {
         if ((string) $rname === "")
             return "Empty round name.";
-        else if (!strcasecmp($rname, "none") || !strcasecmp($rname, "any"))
+        else if (!strcasecmp($rname, "none") || !strcasecmp($rname, "any")
+                 || stri_ends_with($rname, "response"))
             return "Round name $rname is reserved.";
-        else if (!preg_match('/^[a-zA-Z0-9]+$/', $rname))
-            return "Round names can only contain letters and numbers.";
+        else if (!preg_match('/^[a-zA-Z][a-zA-Z0-9]*$/', $rname))
+            return "Round names must start with a letter and contain only letters and numbers.";
         else
             return false;
+    }
+
+    function current_round_name() {
+        return @$this->settingTexts["rev_roundtag"];
     }
 
     function current_round($add = false) {
@@ -467,6 +520,54 @@ class Conference {
         } else
             return 0;
     }
+
+
+
+    function resp_round_list() {
+        if (($x = @$this->settingTexts["resp_rounds"]))
+            return explode(" ", $x);
+        else
+            return array(1);
+    }
+
+    function resp_round_name($rnum) {
+        if (($x = @$this->settingTexts["resp_rounds"])) {
+            $x = explode(" ", $x);
+            if (($n = @$x[$rnum]))
+                return $n;
+        }
+        return "1";
+    }
+
+    function resp_round_text($rnum) {
+        $rname = $this->resp_round_name($rnum);
+        return $rname == "1" ? "" : $rname;
+    }
+
+    static function resp_round_name_error($rname) {
+        if ((string) $rname === "")
+            return "Empty round name.";
+        else if (!strcasecmp($rname, "none") || !strcasecmp($rname, "any")
+                 || stri_ends_with($rname, "response"))
+            return "Round name “{$rname}” is reserved.";
+        else if (!preg_match('/^[a-zA-Z][a-zA-Z0-9]*$/', $rname))
+            return "Round names must start with a letter and contain letters and numbers.";
+        else
+            return false;
+    }
+
+    function resp_round_number($rname) {
+        if (!$rname || $rname === 1 || $rname === "1" || $rname === true
+            || !strcasecmp($rname, "none"))
+            return 0;
+        $rtext = (string) @$this->settingTexts["resp_rounds"];
+        foreach (explode(" ", $rtext) as $i => $x)
+            if (!strcasecmp($x, $rname))
+                return $i;
+        return false;
+    }
+
+
 
     function session($name, $defval = null) {
         if (isset($_SESSION[$this->dsn][$name]))
@@ -575,7 +676,7 @@ class Conference {
             }
         }
         if ($change) {
-            $this->deadline_cache = null;
+            $this->_pc_seeall_cache = null;
             $this->crosscheck_settings();
             if (str_starts_with($name, "opt."))
                 $this->crosscheck_options();
@@ -673,50 +774,6 @@ class Conference {
 
 
     // times
-
-    function deadlines() {
-        global $Now;
-        // Return all deadline-relevant settings as integers.
-        if (!$this->deadline_cache) {
-            $dl = array("now" => $Now);
-            // main deadlines
-            foreach (array("sub_open", "sub_reg", "sub_update", "sub_sub",
-                           "sub_close", "sub_grace",
-                           "resp_open", "resp_done", "resp_grace",
-                           "rev_open", "rev_grace",
-                           "final_open", "final_soft", "final_done",
-                           "final_grace") as $k)
-                $dl[$k] = @+$this->settings[$k];
-            // per-round review deadlines
-            foreach ($this->rounds as $i => $rname)
-                if (!$i || $rname !== ";") {
-                    $suffix = $i ? "_$i" : "";
-                    $ndeadlines = 0;
-                    foreach (self::$review_deadlines as $k) {
-                        $dl[$k . $suffix] = @+$this->settings[$k . $suffix];
-                        $ndeadlines += isset($this->settings[$k . $suffix]);
-                    }
-                    if ($i && $ndeadlines == 0)
-                        foreach (self::$review_deadlines as $k)
-                            $dl[$k . $suffix] = $dl[$k];
-                    if (!$i && !$dl["extrev_soft"] && !$dl["extrev_hard"]) {
-                        $dl["extrev_soft"] = $dl["pcrev_soft"];
-                        $dl["extrev_hard"] = $dl["pcrev_hard"];
-                    }
-                }
-            $this->deadline_cache = $dl;
-        }
-        return $this->deadline_cache;
-    }
-
-    function round_deadlines($roundnum) {
-        $dl = $this->deadlines();
-        $suffix = isset($dl["pcrev_soft_$roundnum"]) ? "_$roundnum" : "";
-        $dlx = array();
-        foreach (self::$review_deadlines as $k)
-            $dlx[$k] = $dl[$k . $suffix];
-        return $dlx;
-    }
 
     function printableInterval($amt) {
         if ($amt > 259200 /* 3 days */) {
@@ -827,7 +884,7 @@ class Conference {
             $t .= $preadjust;
         if ($useradjust) {
             $sp = strpos($useradjust, " ");
-            $t .= "<$useradjust class='usertime' id='usertime$this->usertimeId' style='display:none'></" . ($sp ? substr($useradjust, 0, $sp) : $useradjust) . ">";
+            $t .= "<$useradjust class=\"usertime\" id=\"usertime$this->usertimeId\" style=\"display:none\"></" . ($sp ? substr($useradjust, 0, $sp) : $useradjust) . ">";
             Ht::stash_script("setLocalTime('usertime$this->usertimeId',$value)");
             ++$this->usertimeId;
         }
@@ -857,26 +914,26 @@ class Conference {
     }
 
     function settingsAfter($name) {
-        $dl = $this->deadlines();
-        $t = defval($this->settings, $name, null);
-        return ($t !== null && $t > 0 && $t <= $dl["now"]);
+        global $Now;
+        $t = @$this->settings[$name];
+        return $t !== null && $t > 0 && $t <= $Now;
     }
     function deadlinesAfter($name, $grace = null) {
-        $dl = $this->deadlines();
-        $t = defval($dl, $name, null);
-        if ($t !== null && $t > 0 && $grace && isset($dl[$grace]))
-            $t += $dl[$grace];
-        return ($t !== null && $t > 0 && $t <= $dl["now"]);
+        global $Now;
+        $t = @$this->settings[$name];
+        if ($t !== null && $t > 0 && $grace && ($g = @$this->settings[$grace]))
+            $t += $grace;
+        return $t !== null && $t > 0 && $t <= $Now;
     }
     function deadlinesBetween($name1, $name2, $grace = null) {
-        $dl = $this->deadlines();
-        $t = @$dl[$name1];
-        if (($t === null || $t <= 0 || $t > $dl["now"]) && $name1)
+        global $Now;
+        $t = @$this->settings[$name1];
+        if (($t === null || $t <= 0 || $t > $Now) && $name1)
             return false;
-        $t = @$dl[$name2];
-        if ($t !== null && $t > 0 && $grace && isset($dl[$grace]))
-            $t += $dl[$grace];
-        return ($t === null || $t <= 0 || $t >= $dl["now"]);
+        $t = @$this->settings[$name2];
+        if ($t !== null && $t > 0 && $grace && ($g = @$this->settings[$grace]))
+            $t += $grace;
+        return $t === null || $t <= 0 || $t >= $Now;
     }
 
     function timeStartPaper() {
@@ -903,16 +960,28 @@ class Conference {
         $s = $this->setting("au_seerev");
         return $s == AU_SEEREV_ALWAYS || ($s > 0 && !$reviewsOutstanding);
     }
-    function timeAuthorRespond() {
-        return $this->deadlinesBetween("resp_open", "resp_done", "resp_grace")
-            && $this->timeAuthorViewReviews();
+    function time_author_respond($round = null) {
+        if (!$this->timeAuthorViewReviews() || !$this->setting("resp_active"))
+            return $round === null ? array() : false;
+        if ($round === null) {
+            $allowed = array();
+            foreach ($this->resp_round_list() as $i => $rname) {
+                $isuf = $i ? "_$i" : "";
+                if ($this->deadlinesBetween("resp_open$isuf", "resp_done$isuf", "resp_grace$isuf"))
+                    $allowed[$i] = $rname;
+            }
+            return $allowed;
+        }
+        $isuf = $round ? "_$round" : "";
+        return $this->deadlinesBetween("resp_open$isuf", "resp_done$isuf", "resp_grace$isuf");
     }
     function timeAuthorViewDecision() {
         return $this->setting("seedec") == self::SEEDEC_ALL;
     }
     function time_review_open() {
-        $dl = $this->deadlines();
-        return $dl["rev_open"] > 0 && $dl["now"] >= $dl["rev_open"];
+        global $Now;
+        $rev_open = @+$this->settings["rev_open"];
+        return 0 < $rev_open && $rev_open <= $Now;
     }
     function review_deadline($round, $isPC, $hard) {
         $dn = ($isPC ? "pcrev_" : "extrev_") . ($hard ? "hard" : "soft");
@@ -920,19 +989,20 @@ class Conference {
             $round = $this->current_round(false);
         else if (is_object($round))
             $round = $round->reviewRound ? : 0;
-        if ($round && ($dl = $this->deadlines()) && isset($dl["{$dn}_$round"]))
+        if ($round && isset($this->settings["{$dn}_$round"]))
             $dn .= "_$round";
         return $dn;
     }
     function missed_review_deadline($round, $isPC, $hard) {
-        $dl = $this->deadlines();
-        if (!($dl["rev_open"] > 0 && $dl["now"] >= $dl["rev_open"]))
+        global $Now;
+        $rev_open = @+$this->settings["rev_open"];
+        if (!(0 < $rev_open && $rev_open <= $Now))
             return "rev_open";
         $dn = $this->review_deadline($round, $isPC, $hard);
-        if (!$dl[$dn] || $dl["now"] <= $dl[$dn] + $dl["rev_grace"])
-            return false;
-        else
+        $dv = @+$this->settings[$dn];
+        if ($dv > 0 && $dv + @+$this->settings["rev_grace"] < $Now)
             return $dn;
+        return false;
     }
     function time_review($round, $isPC, $hard) {
         return !$this->missed_review_deadline($round, $isPC, $hard);
@@ -972,7 +1042,7 @@ class Conference {
         return true;
     }
     function timeEmailChairAboutReview() {
-        return $this->settings['rev_notifychair'] > 0;
+        return @$this->settings["rev_notifychair"] > 0;
     }
 
     function submission_blindness() {
@@ -1009,15 +1079,12 @@ class Conference {
     }
 
     function can_pc_see_all_submissions() {
-        $dl = $this->deadlines();
-        $pc_seeall = @$dl["pc_seeall"];
-        if ($pc_seeall === null) {
-            $pc_seeall = @$this->settings["pc_seeall"] ? : 0;
-            if ($pc_seeall > 0 && !$this->timeFinalizePaper())
-                $pc_seeall = 0;
-            $this->deadline_cache["pc_seeall"] = $pc_seeall;
+        if ($this->_pc_seeall_cache === null) {
+            $this->_pc_seeall_cache = @$this->settings["pc_seeall"] ? : 0;
+            if ($this->_pc_seeall_cache > 0 && !$this->timeFinalizePaper())
+                $this->_pc_seeall_cache = 0;
         }
-        return $pc_seeall > 0;
+        return $this->_pc_seeall_cache > 0;
     }
 
 
@@ -1025,7 +1092,8 @@ class Conference {
         if ($this->scriptStuff)
             echo $this->scriptStuff;
         $this->scriptStuff = "";
-        echo "<script>", $script, "</script>";
+        if ($script)
+            echo "<script>", $script, "</script>";
     }
 
     function footerScript($script, $uniqueid = null) {
@@ -1653,7 +1721,7 @@ class Conference {
     function preferenceConflictQuery($type, $extra) {
         $q = "select PRP.paperId, PRP.contactId, PRP.preference
                 from PaperReviewPreference PRP
-                join PCMember PCM on (PCM.contactId=PRP.contactId)
+                join ContactInfo c on (c.contactId=PRP.contactId and (c.roles&" . Contact::ROLE_PC . ")!=0)
                 join Paper P on (P.paperId=PRP.paperId)
                 left join PaperConflict PC on (PC.paperId=PRP.paperId and PC.contactId=PRP.contactId)
                 where PRP.preference<=-100 and coalesce(PC.conflictType,0)<=0
@@ -1772,7 +1840,7 @@ class Conference {
             if ($curcr)
                 /* do nothing */;
             else if (($curcr = array_pop($crows))) {
-                if (!$contact->canViewComment($curcr, $curcr, false)) {
+                if (!$contact->can_view_comment($curcr, $curcr, false)) {
                     $curcr = null;
                     continue;
                 }
@@ -1789,7 +1857,7 @@ class Conference {
             if ($currr)
                 /* do nothing */;
             else if (($currr = array_pop($rrows))) {
-                if (!$contact->canViewReview($currr, $currr, false)) {
+                if (!$contact->can_view_review($currr, $currr, false)) {
                     $currr = null;
                     continue;
                 }
@@ -1862,7 +1930,7 @@ class Conference {
 
     function errorMsgExit($text) {
         if ($text)
-            $this->msg($text, 'merror');
+            $this->msg($text, "merror");
         $this->footer();
         exit;
     }
@@ -1872,16 +1940,33 @@ class Conference {
     // Conference header, footer
     //
 
-    function header_css_link($css) {
+    function make_css_link($url) {
         global $ConfSitePATH, $Opt;
-        echo '<link rel="stylesheet" type="text/css" href="';
-        if (str_starts_with($css, "stylesheets/")
-            || !preg_match(',\A(?:https?:|/),i', $css))
-            echo $Opt["assetsURL"];
-        echo $css;
-        if (($mtime = @filemtime("$ConfSitePATH/$css")) !== false)
-            echo "?mtime=", $mtime;
-        echo "\" />\n";
+        $t = '<link rel="stylesheet" type="text/css" href="';
+        if (str_starts_with($url, "stylesheets/")
+            || !preg_match(',\A(?:https?:|/),i', $url))
+            $t .= $Opt["assetsUrl"];
+        $t .= $url;
+        if (($mtime = @filemtime("$ConfSitePATH/$url")) !== false)
+            $t .= "?mtime=$mtime";
+        return $t . '" />';
+    }
+
+    function make_script_file($url, $no_strict = false) {
+        global $ConfSiteBase, $ConfSitePATH, $Opt;
+        if (str_starts_with($url, "scripts/")) {
+            $post = "";
+            if (($mtime = @filemtime("$ConfSitePATH/$url")) !== false)
+                $post = "mtime=$mtime";
+            if (@$Opt["strictJavascript"] && !$no_strict)
+                $url = $Opt["scriptAssetsUrl"] . "cacheable.php?file=" . urlencode($url)
+                    . "&strictjs=1" . ($post ? "&$post" : "");
+            else
+                $url = $Opt["scriptAssetsUrl"] . $url . ($post ? "?$post" : "");
+            if ($Opt["scriptAssetsUrl"] === $ConfSiteBase)
+                return Ht::script_file($url);
+        }
+        return Ht::script_file($url, array("crossorigin" => "anonymous"));
     }
 
     private function header_head($title) {
@@ -1901,16 +1986,16 @@ class Conference {
         if (isset($Opt["fontScript"]))
             echo $Opt["fontScript"];
 
-        $this->header_css_link("stylesheets/style.css");
+        echo $this->make_css_link("stylesheets/style.css"), "\n";
         if (isset($Opt["stylesheets"]))
             foreach ($Opt["stylesheets"] as $css)
-                $this->header_css_link($css);
+                echo $this->make_css_link($css), "\n";
 
         // favicon
         if (($favicon = defval($Opt, "favicon", "images/review24.png"))) {
             if (strpos($favicon, "://") === false && $favicon[0] != "/") {
-                if (@$Opt["assetsURL"] && substr($favicon, 0, 7) === "images/")
-                    $favicon = $Opt["assetsURL"] . $favicon;
+                if (@$Opt["assetsUrl"] && substr($favicon, 0, 7) === "images/")
+                    $favicon = $Opt["assetsUrl"] . $favicon;
                 else
                     $favicon = $ConfSiteBase . $favicon;
             }
@@ -1925,23 +2010,23 @@ class Conference {
         }
 
         // jQuery
-        if (isset($Opt["jqueryURL"]))
-            $jquery = $Opt["jqueryURL"];
-        else if (@$Opt["jqueryCDN"])
+        if (isset($Opt["jqueryUrl"]))
+            $jquery = $Opt["jqueryUrl"];
+        else if (@$Opt["jqueryCdn"])
             $jquery = "//code.jquery.com/jquery-1.11.2.min.js";
         else
-            $jquery = $Opt["assetsURL"] . "scripts/jquery-1.11.2.min.js";
-        $this->scriptStuff = Ht::script_file($jquery) . "\n";
+            $jquery = "scripts/jquery-1.11.2.min.js";
+        $this->scriptStuff = $this->make_script_file($jquery, true) . "\n";
 
         // Javascript settings to set before script.js
-        $this->scriptStuff .= "<script>hotcrp_base=\"$ConfSiteBase\";hotcrp_suffix=\"$ConfSiteSuffix\"";
+        $this->scriptStuff .= "<script>siteurl=\"$ConfSiteBase\";siteurl_suffix=\"$ConfSiteSuffix\"";
         if (session_id() !== "")
-            $this->scriptStuff .= ";hotcrp_postvalue=\"" . post_value() . "\"";
+            $this->scriptStuff .= ";siteurl_postvalue=\"" . post_value() . "\"";
         if (@$CurrentList
             && ($list = SessionList::lookup($CurrentList)))
             $this->scriptStuff .= ";hotcrp_list={num:$CurrentList,id:\"" . addcslashes($list->listid, "\n\r\\\"/") . "\"}";
         if (($urldefaults = hoturl_defaults()))
-            $this->scriptStuff .= ";hotcrp_urldefaults=" . json_encode($urldefaults);
+            $this->scriptStuff .= ";siteurl_defaults=" . json_encode($urldefaults);
         $huser = (object) array();
         if ($Me && $Me->email)
             $huser->email = $Me->email;
@@ -1959,19 +2044,14 @@ class Conference {
         $this->scriptStuff .= "</script>\n";
 
         // script.js
-        if (@$Opt["strictJavascript"])
-            $this->scriptStuff .= Ht::script_file($Opt["assetsURL"] . "cacheable.php?file=scripts/script.js&strictjs=1&mtime=" . filemtime("$ConfSitePATH/scripts/script.js")) . "\n";
-        else
-            $this->scriptStuff .= Ht::script_file($Opt["assetsURL"] . "scripts/script.js?mtime=" . filemtime("$ConfSitePATH/scripts/script.js")) . "\n";
-
-        $this->scriptStuff .= "<!--[if lte IE 6]> " . Ht::script_file($Opt["assetsURL"] . "scripts/supersleight.js") . " <![endif]-->\n";
+        $this->scriptStuff .= $this->make_script_file("scripts/script.js") . "\n";
 
         echo "<title>", $title, " - ", htmlspecialchars($Opt["shortName"]),
             "</title>\n</head>\n";
     }
 
     function header($title, $id = "", $actionBar = null, $showTitle = true) {
-        global $ConfSiteBase, $ConfSitePATH, $Me, $Now, $Opt;
+        global $ConfSiteBase, $ConfSitePATH, $CurrentProw, $Me, $Now, $Opt;
         if ($this->headerPrinted)
             return;
         if ($actionBar === null)
@@ -1990,11 +2070,8 @@ class Conference {
         $this->scriptStuff .= "hotcrp_load.time(" . (-date("Z", $Now) / 60) . "," . (@$Opt["time24hour"] ? 1 : 0) . ")";
 
         // deadlines settings
-        if ($Me) {
-            $dl = $Me->my_deadlines();
-            $this->scriptStuff .= ";hotcrp_deadlines.init(" . json_encode($dl) . ")";
-        } else
-            $dl = array();
+        if ($Me)
+            $this->scriptStuff .= ";hotcrp_deadlines.init(" . json_encode($Me->my_deadlines($CurrentProw)) . ")";
 
         // meeting tracker
         $trackerowner = $Me && $Me->privChair
@@ -2010,11 +2087,11 @@ class Conference {
 
         echo "<div id='prebody'>\n";
 
-        echo "<div id='header'>\n<div id='header_left_conf'><h1>";
+        echo "<div id='header'>\n<div id='header_site'><h1>";
         if ($title && $showTitle && $title == "Home")
             echo "<a class='q' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a>";
         else
-            echo "<a class='x' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a></h1></div><div id='header_left_page'><h1>", $title;
+            echo "<a class='x' href='", hoturl("index"), "' title='Home'>", htmlspecialchars($Opt["shortName"]), "</a></h1></div><div id='header_page'><h1>", $title;
         echo "</h1></div><div id='header_right'>";
         if ($Me && !$Me->is_empty()) {
             // profile link
@@ -2043,31 +2120,7 @@ class Conference {
             if (!$Me->is_empty() || isset($Opt["httpAuthLogin"]))
                 echo $xsep, '<a href="', hoturl_post("index", "signout=1"), '">Sign&nbsp;out</a>';
         }
-        echo "<div id='maindeadline' style='display:none'>";
-
-        // This is repeated in script.js:hotcrp_deadlines
-        $dlname = "";
-        $dltime = 0;
-        if (@$dl["sub_open"]) {
-            foreach (array("sub_reg" => "registration", "sub_update" => "update", "sub_sub" => "submission") as $subtype => $subname)
-                if (isset($dl["${subtype}_ingrace"]) || $Now <= defval($dl, $subtype, 0)) {
-                    $dlname = "Paper $subname deadline";
-                    $dltime = defval($dl, $subtype, 0);
-                    break;
-                }
-        }
-        if ($dlname) {
-            $s = "<a href=\"" . hoturl("deadlines") . "\">$dlname</a> ";
-            if (!$dltime || $dltime <= $Now)
-                $s .= "is NOW";
-            else
-                $s .= "in " . $this->printableInterval($dltime - $Now);
-            if (!$dltime || $dltime - $Now <= 180)
-                $s = "<span class='impending'>$s</span>";
-            echo $s;
-        }
-
-        echo "</div></div>\n";
+        echo '<div id="maindeadline" style="display:none"></div></div>', "\n";
 
         echo "  <hr class=\"c\" />\n";
 
@@ -2245,7 +2298,7 @@ class Conference {
             $name = substr($name, 4);
         if ($name === "revprefdescription" && $this->has_topics())
             $name .= ".withtopics";
-        else if ($name === "responseinstructions" && $this->setting("resp_words", 500) > 0)
+        else if (str_starts_with($name, "resp_instrux") && $this->setting("resp_words", 500) > 0)
             $name .= ".wordlimit";
         return $name;
     }
@@ -2259,8 +2312,8 @@ class Conference {
             $html = Message::default_html($name);
         if ($html && $expansions)
             foreach ($expansions as $k => $v)
-                $html = str_replace("%$k%", $v, $html);
-        return $html ? $html : "";
+                $html = str_ireplace("%$k%", $v, $html);
+        return $html;
     }
 
     public function message_default_html($name) {
